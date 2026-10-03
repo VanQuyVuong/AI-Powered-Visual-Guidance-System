@@ -1,5 +1,5 @@
-ultralytics==8.3.0
-opencv-python==4.10.0.84
+ultralytics
+opencv-python
 fastapi
 uvicorn
 python-multipart
