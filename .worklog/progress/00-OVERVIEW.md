@@ -12,9 +12,9 @@ Tài liệu này dùng để theo dõi tiến độ công việc dựa trên `TE
 - [ ] **G1 (Người 2):** Khởi tạo Flutter app, giao diện chọn ảnh, hiển thị ảnh preview.
 
 ### Sprint 2: Logic & API Backend
-- [ ] **G2 (Người 1):** Thuật toán tính Position (Left/Center/Right).
-- [ ] **G2 (Người 1):** Decision Engine (ưu tiên vật thể, tạo câu Guidance tiếng Việt).
-- [ ] **G2 (Người 1):** Dựng FastAPI server endpoint `/api/v1/vision/analyze`.
+- [x] **G2 (Người 1):** Thuật toán tính Position (Left/Center/Right).
+- [x] **G2 (Người 1):** Decision Engine (ưu tiên vật thể, tạo câu Guidance tiếng Việt).
+- [x] **G2 (Người 1):** Dựng FastAPI server endpoint `/api/v1/vision/analyze`.
 - [ ] **G2 (Người 2):** Flutter gọi API backend, nhận JSON và hiển thị text cảnh báo lên màn hình.
 
 ### Sprint 3: Tích hợp Giọng nói
