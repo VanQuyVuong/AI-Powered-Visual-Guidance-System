@@ -6,6 +6,7 @@ import uvicorn
 from app.schemas.vision import VisionAnalyzeResponse, Detection, Guidance, BoundingBox
 from app.vision.yolo_service import run_inference
 from app.vision.decision_engine import determine_position, generate_guidance
+from app.services.voice_service import VoiceServiceAdapter
 
 app = FastAPI(title="AI Visual Guidance API", version="0.1 (MVP)")
 
@@ -50,8 +51,13 @@ async def analyze_image(image: UploadFile = File(...)):
             )
             final_detections.append(det_obj)
             
-        # 4. Bước 3 của Pipeline: Sinh câu tiếng Việt
+        # 4. Bước 3 của Pipeline: Sinh câu tiếng Việt & Lấy Audio URL
         guidance_data = generate_guidance(final_detections)
+        if guidance_data:
+            # Gọi API giả lập để lấy file âm thanh
+            audio_url = await VoiceServiceAdapter.generate_speech_url(guidance_data["text"])
+            guidance_data["audio_url"] = audio_url
+            
         guidance_obj = Guidance(**guidance_data) if guidance_data else None
         
         # 5. Trả kết quả JSON về cho App

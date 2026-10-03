@@ -19,6 +19,7 @@ class Detection(BaseModel):
 class Guidance(BaseModel):
     text: str
     priority: Optional[str] = None
+    audio_url: Optional[str] = None
 
 # Cấu trúc API Response trả về cho Flutter
 class VisionAnalyzeResponse(BaseModel):

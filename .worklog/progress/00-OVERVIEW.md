@@ -18,7 +18,7 @@ Tài liệu này dùng để theo dõi tiến độ công việc dựa trên `TE
 - [ ] **G2 (Người 2):** Flutter gọi API backend, nhận JSON và hiển thị text cảnh báo lên màn hình.
 
 ### Sprint 3: Tích hợp Giọng nói
-- [ ] **G5 (Người 1):** Tích hợp Voice API (Blaze TTS) dạng Adapter trên Backend.
+- [x] **G5 (Người 1):** Tích hợp Voice API (Blaze TTS) dạng Adapter trên Backend.
 - [ ] **G5 (Người 2):** Audio player trên Flutter, tự động phát âm thanh khi có kết quả.
 
 ### Sprint 4: Tích hợp End-to-End
