@@ -56,14 +56,16 @@ def test_yolo_detection(image_path):
     print(json.dumps(output, indent=2, ensure_ascii=False))
 
 if __name__ == "__main__":
-    # Thay đổi đường dẫn ảnh này thành 1 ảnh có thật trong máy bạn để test
-    sample_image = "../test_images/sample.jpg" 
+    # Dùng đường dẫn tuyệt đối dựa trên vị trí của file script này
+    # Dù bạn chạy lệnh ở thư mục nào thì nó vẫn tìm đúng thư mục test_images
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    test_images_dir = os.path.join(project_root, "test_images")
+    sample_image = os.path.join(test_images_dir, "sample.jpg")
     
-    # Tạo folder test_images và 1 file ảnh rỗng để code không lỗi file not found 
-    # (Thực tế bạn cần copy một tấm ảnh thật vào đây)
-    os.makedirs("../test_images", exist_ok=True)
+    os.makedirs(test_images_dir, exist_ok=True)
     if not os.path.exists(sample_image):
-        print("Tạo một ảnh mẫu màu đen để test vì chưa có ảnh thật...")
+        print(f"Tạo một ảnh mẫu màu đen tại {sample_image} vì chưa có ảnh thật...")
         import numpy as np
         dummy_img = np.zeros((480, 640, 3), dtype=np.uint8)
         cv2.imwrite(sample_image, dummy_img)

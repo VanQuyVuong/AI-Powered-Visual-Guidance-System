@@ -8,7 +8,7 @@ Tài liệu này dùng để theo dõi tiến độ công việc dựa trên `TE
 ## 🚀 Trạng thái Sprint (MVP - Vertical Slice)
 
 ### Sprint 1: Khởi động & Nhận diện cơ bản
-- [ ] **G1 (Người 1):** Cài đặt Python, load YOLO pretrained, xử lý 1 ảnh ra JSON (class, confidence, bbox).
+- [x] **G1 (Người 1):** Cài đặt Python, load YOLO pretrained, xử lý 1 ảnh ra JSON (class, confidence, bbox).
 - [ ] **G1 (Người 2):** Khởi tạo Flutter app, giao diện chọn ảnh, hiển thị ảnh preview.
 
 ### Sprint 2: Logic & API Backend
