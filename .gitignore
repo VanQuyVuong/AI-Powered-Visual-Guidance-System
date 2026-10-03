@@ -1,0 +1,22 @@
+# Môi trường ảo Python
+.venv/
+venv/
+env/
+ENV/
+
+# File chứa API Key bí mật
+.env
+.env.local
+
+# Các thư mục hệ thống & IDE
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+
+# Thư mục chứa dữ liệu model AI (không push lên Github vì rất nặng)
+*.pt
+*.onnx
+
+# Dữ liệu test
+test_images/
