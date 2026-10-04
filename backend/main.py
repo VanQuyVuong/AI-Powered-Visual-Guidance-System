@@ -111,7 +111,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     final_detections.append({
                         "id": det.get("id"),
                         "class": det["class_name"],
-                        "position": pos
+                        "position": pos,
+                        "box": box
                     })
                     
                 # Gửi kết quả về cực nhanh
