@@ -16,6 +16,28 @@ def determine_position(x1: int, x2: int, image_width: int = 640) -> str:
         return "center"
 
 
+def is_in_roi(x1: int, y1: int, x2: int, y2: int, img_width: int, img_height: int) -> bool:
+    """
+    Thuật toán VÙNG QUAN TÂM (Region of Interest - ROI):
+    Lọc bỏ các vật thể nằm ở rìa đường hoặc trên trời. Chỉ cảnh báo vật trong hình quạt trước mặt.
+    """
+    # Lấy tọa độ điểm chạm đất của vật cản (Giữa, dưới cùng của Bounding Box)
+    obj_bottom_x = (x1 + x2) / 2
+    obj_bottom_y = y2
+    
+    # 1. Trục Y (Chiều cao): Nếu vật thể lơ lửng ở nửa trên màn hình -> Bỏ qua
+    if obj_bottom_y < (img_height * 0.4):
+        return False
+        
+    # 2. Trục X (Chiều ngang): Nếu vật thể nằm tít bên lề trái (dưới 20%) hoặc lề phải (trên 80%) -> Bỏ qua
+    left_margin = img_width * 0.2
+    right_margin = img_width * 0.8
+    if obj_bottom_x < left_margin or obj_bottom_x > right_margin:
+        return False
+        
+    return True
+
+
 def generate_guidance(detections: list) -> dict:
     """
     Nhận danh sách các vật thể, lọc ra vật thể quan trọng và ghép thành câu tiếng Việt.

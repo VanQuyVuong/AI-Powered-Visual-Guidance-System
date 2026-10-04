@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Real-time Video Tracking</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #121212; color: white; }
+        video { border: 2px solid #4CAF50; border-radius: 8px; width: 640px; max-width: 100%; }
+        #logs { margin-top: 20px; padding: 10px; background: #222; border-radius: 8px; height: 200px; overflow-y: auto; text-align: left; width: 640px; display: inline-block; }
+    </style>
+</head>
+<body>
+    <h2>Thử nghiệm Real-time Tracking (Gửi Frame về Server)</h2>
+    
+    <!-- Nút bấm khổng lồ nằm ngay trên cùng -->
+    <button id="startBtn" style="padding: 20px 40px; font-size: 24px; background-color: #4CAF50; color: white; border: none; border-radius: 10px; cursor: pointer; margin-bottom: 20px; font-weight: bold; width: 640px; max-width: 100%;">🔴 BẤM VÀO ĐÂY ĐỂ BẮT ĐẦU KẾT NỐI AI</button>
+    <br>
+
+    <video id="video" autoplay playsinline></video>
+    <br>
+    <div id="logs">Đang chờ kết nối...<br></div>
+
+    <script>
+        const video = document.getElementById('video');
+        const logs = document.getElementById('logs');
+        const startBtn = document.getElementById('startBtn');
+        let ws;
+
+        // Bật Camera
+        navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+            video.srcObject = stream;
+        }).catch(err => {
+            logs.innerHTML += `<span style="color:red">Lỗi Camera: ${err}</span><br>`;
+        });
+
+        startBtn.onclick = () => {
+            if(ws && ws.readyState === WebSocket.OPEN) return;
+            
+            logs.innerHTML += `Đang kết nối tới WebSocket Server...<br>`;
+            ws = new WebSocket("ws://localhost:8000/api/v1/vision/stream");
+            
+            ws.onopen = () => {
+                logs.innerHTML += `<span style="color:green">Đã kết nối! Bắt đầu gửi ảnh...</span><br>`;
+                startBtn.innerText = "Đang chạy...";
+                
+                // Cứ mỗi 300ms (khoảng 3 hình/giây), chụp 1 bức ảnh gửi lên Server
+                setInterval(sendFrame, 300); 
+            };
+            
+            ws.onmessage = (event) => {
+                const res = JSON.parse(event.data);
+                if(res.objects && res.objects.length > 0) {
+                    const objTexts = res.objects.map(o => `[ID:${o.id}] ${o.class} (${o.position})`).join(", ");
+                    logs.innerHTML = `<span style="color:yellow">AI Thấy: ${objTexts}</span><br>` + logs.innerHTML;
+                }
+            };
+            
+            ws.onclose = () => logs.innerHTML += `<span style="color:red">Bị mất kết nối!</span><br>`;
+        };
+
+        function sendFrame() {
+            if(!ws || ws.readyState !== WebSocket.OPEN) return;
+            
+            // Vẽ ảnh từ Camera ra một khung Canvas ẩn
+            const canvas = document.createElement("canvas");
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Chuyển thành chuỗi Base64 (chuẩn nén ảnh web)
+            const base64Data = canvas.toDataURL("image/jpeg", 0.7); 
+            
+            // Gửi lên Server
+            ws.send(base64Data);
+        }
+    </script>
+</body>
+</html>
