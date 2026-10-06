@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -42,12 +43,14 @@ class _VisionScreenState extends State<VisionScreen> {
   CameraController? _controller;
   WebSocketChannel? _channel;
   FlutterTts flutterTts = FlutterTts();
+  Timer? _timer;
   
   bool _isStreaming = false;
   bool _isProcessingFrame = false;
   String _latestWarning = "Bấm Bắt đầu để quét";
   
-  // Sửa lại IP này thành IPv4 của máy tính (VD: 192.168.1.100) nếu chạy trên máy ảo/điện thoại thật
+  // IP của Server. Nếu chạy bằng máy thật và cắm cáp, hãy nhập IP LAN của máy tính (vd: 192.168.1.5)
+  // 10.0.2.2 là IP loopback của máy ảo Android Studio.
   final String serverUrl = "ws://10.0.2.2:8000/api/v1/vision/stream";
 
   @override
@@ -60,8 +63,8 @@ class _VisionScreenState extends State<VisionScreen> {
   Future<void> _initCamera() async {
     if (cameras.isEmpty) return;
     _controller = CameraController(
-      cameras[0], // Camera sau
-      ResolutionPreset.low, // Gửi ảnh độ phân giải thấp cho lẹ
+      cameras[0], 
+      ResolutionPreset.low, 
       enableAudio: false,
     );
     await _controller!.initialize();
@@ -76,7 +79,7 @@ class _VisionScreenState extends State<VisionScreen> {
   void _startStreaming() {
     if (_controller == null || !_controller!.value.isInitialized) return;
     
-    // Mở kết nối tới FastAPI WebSocket
+    // Kết nối tới WebSocket của FastAPI
     _channel = WebSocketChannel.connect(Uri.parse(serverUrl));
     
     setState(() {
@@ -84,15 +87,14 @@ class _VisionScreenState extends State<VisionScreen> {
       _latestWarning = "Đã kết nối Server. Đang quét...";
     });
     
-    // Lắng nghe phản hồi từ Server
+    // Lắng nghe cảnh báo từ AI trả về
     _channel!.stream.listen((message) {
       final data = jsonDecode(message);
       if (data['success'] == true) {
         List objects = data['objects'] ?? [];
         if (objects.isNotEmpty) {
-          // Lấy tên vật thể và cảnh báo
           List<String> warnings = objects.map((obj) => obj['class'].toString()).toList();
-          String warningText = "Cẩn thận, có ${warnings.join(', ')} phía trước.";
+          String warningText = "Phía trước có ${warnings.join(' và ')}.";
           
           setState(() {
             _latestWarning = warningText;
@@ -104,25 +106,31 @@ class _VisionScreenState extends State<VisionScreen> {
     }, onDone: () {
       _stopStreaming();
     }, onError: (error) {
-      print("Lỗi WebSocket: $error");
+      setState(() {
+        _latestWarning = "Lỗi kết nối: $error";
+      });
       _stopStreaming();
     });
 
-    // Bắt đầu chụp ảnh liên tục từ Camera
-    _controller!.startImageStream((CameraImage image) async {
+    // Cứ mỗi 1 giây sẽ chụp 1 bức ảnh (JPEG) gửi lên Server để phân tích
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       if (_isProcessingFrame || !_isStreaming) return;
       _isProcessingFrame = true;
       
       try {
-        // Ghi chú: Chuyển đổi YUV420 sang JPEG trong Flutter khá phức tạp.
-        // Ở phiên bản MVP này, ta chỉ gửi tín hiệu Ping để test luồng dữ liệu trước
-        // (Trong thực tế cần hàm chuyển đổi YUV -> JPEG để gửi qua base64)
-        _channel?.sink.add("Ping from Flutter"); 
+        // Chụp ảnh định dạng JPEG
+        XFile file = await _controller!.takePicture();
+        
+        // Chuyển file ảnh thành Base64 để gửi qua mạng
+        List<int> imageBytes = await File(file.path).readAsBytes();
+        String base64Image = base64Encode(imageBytes);
+        
+        // Gửi lên WebSocket
+        _channel?.sink.add(base64Image); 
       } catch (e) {
-        print(e);
+        print("Lỗi chụp ảnh: $e");
       }
       
-      await Future.delayed(const Duration(milliseconds: 500)); // Gửi 2 frame/giây
       _isProcessingFrame = false;
     });
   }
@@ -130,14 +138,17 @@ class _VisionScreenState extends State<VisionScreen> {
   void _stopStreaming() {
     setState(() {
       _isStreaming = false;
-      _latestWarning = "Đã dừng quét.";
+      if (_latestWarning.contains("Đang quét")) {
+        _latestWarning = "Đã dừng quét.";
+      }
     });
-    _controller?.stopImageStream();
+    _timer?.cancel();
     _channel?.sink.close();
   }
 
   @override
   void dispose() {
+    _timer?.cancel();
     _controller?.dispose();
     _channel?.sink.close();
     super.dispose();

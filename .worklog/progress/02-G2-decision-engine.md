@@ -11,7 +11,7 @@ Dựa trên kết quả Bounding Box (tọa độ x, y) của YOLO, tính toán 
 - [x] Viết hàm sinh câu tiếng Việt `generate_guidance(detections)`.
 - [x] Khởi tạo FastAPI Server (Endpoint `POST /api/v1/vision/analyze`).
 - [x] Tích hợp YOLO vào FastAPI.
-- [ ] Test API bằng cURL hoặc Postman.
+- [x] Test API bằng pytest (28 tests). Phát hiện và sửa bug priority (`.capitalize()` vs lowercase check).
 
 ## Ghi chú trong quá trình làm
 - Thuật toán chia khung hình làm 3 phần bằng nhau: 0 -> 1/3 (Trái), 1/3 -> 2/3 (Giữa), 2/3 -> 3/3 (Phải).
