@@ -38,6 +38,22 @@ def is_in_roi(x1: int, y1: int, x2: int, y2: int, img_width: int, img_height: in
     return True
 
 
+def estimate_distance(y1: int, y2: int, img_height: int) -> str:
+    """
+    Ước lượng khoảng cách dựa trên tỷ lệ chiều cao của vật thể so với khung hình.
+    Vật càng to (chiếm nhiều tỷ lệ khung hình) -> Càng gần.
+    """
+    obj_height = y2 - y1
+    ratio = obj_height / img_height
+    
+    if ratio > 0.6:
+        return "rất gần"
+    elif ratio > 0.3:
+        return "ở khoảng cách vừa"
+    else:
+        return "ở xa"
+
+
 def generate_guidance(detections: list) -> dict:
     """
     Nhận danh sách các vật thể, lọc ra vật thể quan trọng và ghép thành câu tiếng Việt.
@@ -57,29 +73,25 @@ def generate_guidance(detections: list) -> dict:
     
     parts = []
     for det in detections:
-        # Chỉ cảnh báo các vật thể mà AI chắc chắn trên 50%
         if det.confidence < 0.5:
             continue
             
-        # Lấy tên tiếng Việt, nếu không có trong từ điển thì giữ nguyên tiếng Anh
         name_vn = vocab.get(det.class_name, det.class_name)
+        dist_str = f", {det.distance}" if hasattr(det, 'distance') and det.distance else ""
         
-        # Ghép câu dựa trên vị trí
         if det.position == "left":
-            parts.append(f"bên trái có {name_vn}")
+            parts.append(f"bên trái có {name_vn}{dist_str}")
         elif det.position == "right":
-            parts.append(f"bên phải có {name_vn}")
+            parts.append(f"bên phải có {name_vn}{dist_str}")
         else:
-            parts.append(f"phía trước có {name_vn}")
+            parts.append(f"phía trước có {name_vn}{dist_str}")
             
-    # Nếu lọc xong mà không có vật thể nào đủ độ tin cậy
     if not parts:
         return None
         
-    # Ghép các vế lại với nhau bằng chữ "và", viết hoa chữ cái đầu và thêm dấu chấm
     text = " và ".join(parts).capitalize() + "."
     
     return {
         "text": text,
-        "priority": "HIGH" if "phía trước" in text else "MEDIUM"
+        "priority": "HIGH" if "phía trước" in text.lower() else "MEDIUM"
     }

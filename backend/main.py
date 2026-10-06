@@ -1,11 +1,12 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+import base64
 
 # Import các thành phần chúng ta vừa tạo
 from app.schemas.vision import VisionAnalyzeResponse, Detection, Guidance, BoundingBox
-from app.vision.yolo_service import run_inference
-from app.vision.decision_engine import determine_position, generate_guidance
+from app.vision.yolo_service import run_inference, run_tracking
+from app.vision.decision_engine import determine_position, generate_guidance, is_in_roi
 
 app = FastAPI(title="AI Visual Guidance API", version="0.1 (MVP)")
 
@@ -73,9 +74,6 @@ async def analyze_image(image: UploadFile = File(...)):
 # ==========================================
 # WEBSOCKET CHO REAL-TIME VIDEO TRACKING
 # ==========================================
-from fastapi import WebSocket, WebSocketDisconnect
-import base64
-from app.vision.yolo_service import run_tracking
 
 @app.websocket("/api/v1/vision/stream")
 async def websocket_endpoint(websocket: WebSocket):
@@ -97,7 +95,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 raw_detections, img_width, img_height = run_tracking(image_bytes)
                 
                 # 3. Decision Engine + ROI Filter
-                from app.vision.decision_engine import is_in_roi
                 
                 final_detections = []
                 for det in raw_detections:
@@ -134,6 +131,5 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # Dành cho việc chạy Backend
 if __name__ == "__main__":
-    import uvicorn
     # Để chạy server, gõ: python backend/main.py
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
