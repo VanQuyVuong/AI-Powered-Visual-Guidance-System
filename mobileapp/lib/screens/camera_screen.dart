@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import '../services/api_service.dart';
 import '../services/tts_service.dart';
 import '../services/location_service.dart';
+import '../services/voice_service.dart';
 
 class CameraScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -21,9 +22,11 @@ class _CameraScreenState extends State<CameraScreen> {
   final ApiService _apiService = ApiService();
   final TtsService _ttsService = TtsService();
   final LocationService _locationService = LocationService();
+  final VoiceService _voiceService = VoiceService();
   
   bool _isStreaming = false;
   bool _isProcessingFrame = false;
+  bool _isListening = false;
   String _latestWarning = "Bấm Bắt đầu để quét";
   String _currentLocation = "Đang tìm vệ tinh GPS...";
   Timer? _timer;
@@ -34,6 +37,11 @@ class _CameraScreenState extends State<CameraScreen> {
     _initCamera();
     _ttsService.init();
     _fetchLocation();
+    _initVoice();
+  }
+
+  Future<void> _initVoice() async {
+    await _voiceService.init();
   }
 
   Future<void> _fetchLocation() async {
@@ -187,7 +195,35 @@ class _CameraScreenState extends State<CameraScreen> {
           )
         ],
       ),
+      // Nút Voice Command nổi ở góc dưới
+      floatingActionButton: FloatingActionButton(
+        onPressed: _toggleListening,
+        backgroundColor: _isListening ? Colors.red : Colors.teal,
+        child: Icon(_isListening ? Icons.mic : Icons.mic_none, color: Colors.white),
+      ),
     );
+  }
+
+  // Hàm xử lý trợ lý ảo giọng nói
+  void _toggleListening() {
+    if (_isListening) {
+      _voiceService.stopListening();
+      setState(() => _isListening = false);
+    } else {
+      setState(() => _isListening = true);
+      _voiceService.startListening((text) {
+        if (text.contains("bắt đầu") || text.contains("quét")) {
+          if (!_isStreaming) _startStreaming();
+          _toggleListening(); // Dừng nghe sau khi nhận lệnh
+        } else if (text.contains("dừng") || text.contains("tắt")) {
+          if (_isStreaming) _stopStreaming();
+          _toggleListening();
+        } else if (text.contains("đọc") || text.contains("chữ")) {
+          _readText();
+          _toggleListening();
+        }
+      });
+    }
   }
 
   // Hàm xử lý khi bấm nút Đọc Chữ
