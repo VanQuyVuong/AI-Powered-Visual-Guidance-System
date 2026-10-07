@@ -7,6 +7,7 @@ import '../services/api_service.dart';
 import '../services/tts_service.dart';
 import '../services/location_service.dart';
 import '../services/voice_service.dart';
+import '../services/routing_service.dart';
 
 class CameraScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -23,6 +24,7 @@ class _CameraScreenState extends State<CameraScreen> {
   final TtsService _ttsService = TtsService();
   final LocationService _locationService = LocationService();
   final VoiceService _voiceService = VoiceService();
+  final RoutingService _routingService = RoutingService();
   
   bool _isStreaming = false;
   bool _isProcessingFrame = false;
@@ -221,8 +223,38 @@ class _CameraScreenState extends State<CameraScreen> {
         } else if (text.contains("đọc") || text.contains("chữ")) {
           _readText();
           _toggleListening();
+        } else if (text.contains("dẫn đường") || text.contains("bản đồ")) {
+          _testRouting();
+          _toggleListening();
         }
       });
+    }
+  }
+
+  // Hàm test lấy lộ trình đi bộ
+  Future<void> _testRouting() async {
+    _ttsService.speak("Đang tính toán lộ trình đi bộ.");
+    Position? pos = await _locationService.getCurrentLocation();
+    if (pos != null) {
+      // Giả lập điểm đến cách đó một đoạn ngắn (Cộng thêm 0.005 độ vào Vĩ độ/Kinh độ)
+      double endLat = pos.latitude + 0.005;
+      double endLng = pos.longitude + 0.005;
+      
+      List<String> steps = await _routingService.getWalkingRoute(
+        pos.latitude, pos.longitude, endLat, endLng
+      );
+      
+      if (steps.isNotEmpty) {
+        // Đọc to bước chỉ đường đầu tiên
+        setState(() {
+          _latestWarning = "Bước 1: ${steps[1]}"; // Lấy bước 1 (bước 0 thường là xuất phát)
+        });
+        _ttsService.speak(steps[1]);
+      } else {
+        _ttsService.speak("Không tìm thấy đường đi.");
+      }
+    } else {
+      _ttsService.speak("Chưa định vị được GPS.");
     }
   }
 
