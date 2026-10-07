@@ -72,6 +72,28 @@ async def analyze_image(image: UploadFile = File(...)):
         )
 
 # ==========================================
+# API ĐỌC VĂN BẢN (OCR)
+# ==========================================
+from app.vision.ocr_service import extract_text
+
+@app.post("/api/v1/vision/read_text")
+async def read_text_api(image: UploadFile = File(...)):
+    """
+    API dành riêng cho tính năng đọc chữ. 
+    Người dùng giơ camera vào một bảng hiệu hoặc tờ giấy, AI sẽ đọc chữ trên đó.
+    """
+    if not image.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File không hợp lệ.")
+        
+    contents = await image.read()
+    text = extract_text(contents)
+    
+    return {
+        "success": True,
+        "text": text
+    }
+
+# ==========================================
 # WEBSOCKET CHO REAL-TIME VIDEO TRACKING
 # ==========================================
 
@@ -95,6 +117,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 raw_detections, img_width, img_height = run_tracking(image_bytes)
                 
                 # 3. Decision Engine + ROI Filter
+                from app.vision.decision_engine import is_in_roi, determine_position, generate_guidance
+                from app.schemas.vision import Detection, BoundingBox
+                from app.vision.tactile_paving_detector import detect_tactile_paving
+                
+                # Kiểm tra xem người dùng có đang đi trên gạch dẫn đường không
+                is_on_tactile = detect_tactile_paving(image_bytes)
                 
                 final_detections = []
                 for det in raw_detections:
@@ -105,17 +133,33 @@ async def websocket_endpoint(websocket: WebSocket):
                         continue # Bỏ qua, vật thể này an toàn!
                         
                     pos = determine_position(box["x1"], box["x2"], img_width)
-                    final_detections.append({
-                        "id": det.get("id"),
-                        "class": det["class_name"],
-                        "position": pos,
-                        "box": box
-                    })
+                    
+                    # Convert to Detection object for generate_guidance compatibility
+                    det_obj = Detection(
+                        class_name=det["class_name"],
+                        confidence=det["confidence"],
+                        position=pos,
+                        bounding_box=BoundingBox(**box)
+                    )
+                    final_detections.append(det_obj)
+                    
+                # 4. Sinh câu tiếng Việt & Thêm cảnh báo lề đường
+                guidance_data = generate_guidance(final_detections) or {"text": "", "priority": "LOW"}
+                
+                if is_on_tactile:
+                    if guidance_data["text"]:
+                        guidance_data["text"] = "Đang ở trên vạch dẫn đường. " + guidance_data["text"]
+                    else:
+                        guidance_data["text"] = "Đang đi đúng vạch dẫn đường."
+                        guidance_data["priority"] = "LOW"
+                elif not guidance_data["text"]:
+                    guidance_data["text"] = "An toàn phía trước."
                     
                 # Gửi kết quả về cực nhanh
                 await websocket.send_json({
                     "success": True,
-                    "objects": final_detections
+                    "objects": [det.model_dump() for det in final_detections],
+                    "guidance": guidance_data
                 })
             except Exception as frame_error:
                 # Bắt lỗi từng ảnh riêng lẻ để không làm sập toàn bộ kết nối WebSocket

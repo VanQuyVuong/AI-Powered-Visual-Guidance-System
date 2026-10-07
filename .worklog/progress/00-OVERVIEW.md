@@ -17,11 +17,11 @@ Tài liệu này dùng để theo dõi tiến độ công việc dựa trên `TE
 - [x] **G2 (Người 1):** Dựng FastAPI server endpoint `/api/v1/vision/analyze`.
 - [x] **G2 (Người 1):** Unit Tests cho Decision Engine (28 tests PASSED ✅). Phát hiện và sửa bug priority.
 - [x] **G2 (Người 1):** Sửa lỗi code quality (import lặp, import trong vòng lặp).
-- [ ] **G2 (Người 2):** Flutter gọi API backend, nhận JSON và hiển thị text cảnh báo lên màn hình.
+- [x] **G2 (Người 2):** Flutter gọi API backend, nhận JSON và hiển thị text cảnh báo lên màn hình.
 
 ### Sprint 3: Tích hợp Giọng nói
 - [ ] **G5 (Người 1):** Tích hợp Voice API (Blaze TTS) dạng Adapter trên Backend.
-- [ ] **G5 (Người 2):** Audio player trên Flutter, tự động phát âm thanh khi có kết quả.
+- [x] **G5 (Người 2):** Audio player trên Flutter, tự động phát âm thanh khi có kết quả (Đã thay thế tạm bằng Local TTS).
 
 ### Sprint 4: Tích hợp End-to-End
 - [ ] **End-to-End:** `Camera App → FastAPI → YOLO → Decision Engine → Voice API → Phát âm thanh trên App`.
