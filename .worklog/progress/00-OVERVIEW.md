@@ -15,6 +15,8 @@ Tài liệu này dùng để theo dõi tiến độ công việc dựa trên `TE
 - [x] **G2 (Người 1):** Thuật toán tính Position (Left/Center/Right).
 - [x] **G2 (Người 1):** Decision Engine (ưu tiên vật thể, tạo câu Guidance tiếng Việt).
 - [x] **G2 (Người 1):** Dựng FastAPI server endpoint `/api/v1/vision/analyze`.
+- [x] **G2 (Người 1):** Unit Tests cho Decision Engine (28 tests PASSED ✅). Phát hiện và sửa bug priority.
+- [x] **G2 (Người 1):** Sửa lỗi code quality (import lặp, import trong vòng lặp).
 - [x] **G2 (Người 2):** Flutter gọi API backend, nhận JSON và hiển thị text cảnh báo lên màn hình.
 
 ### Sprint 3: Tích hợp Giọng nói
