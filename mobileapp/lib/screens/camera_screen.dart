@@ -168,6 +168,19 @@ class _CameraScreenState extends State<CameraScreen> {
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                   ),
+                ),
+                const SizedBox(height: 10),
+                // Nút bấm riêng biệt để đọc chữ (OCR)
+                ElevatedButton.icon(
+                  onPressed: _readText,
+                  icon: const Icon(Icons.menu_book),
+                  label: const Text("ĐỌC CHỮ (OCR)"),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                    backgroundColor: Colors.blueAccent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  ),
                 )
               ],
             ),
@@ -175,5 +188,35 @@ class _CameraScreenState extends State<CameraScreen> {
         ],
       ),
     );
+  }
+
+  // Hàm xử lý khi bấm nút Đọc Chữ
+  Future<void> _readText() async {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+    if (_isProcessingFrame) return;
+
+    setState(() {
+      _latestWarning = "Đang đọc chữ, vui lòng giữ yên...";
+    });
+    _ttsService.speak("Đang phân tích chữ viết.");
+
+    try {
+      _isProcessingFrame = true;
+      XFile picture = await _controller!.takePicture();
+      Uint8List bytes = await picture.readAsBytes();
+      
+      String? text = await _apiService.readTextFromImage(bytes);
+      
+      if (text != null && mounted) {
+        setState(() {
+          _latestWarning = text;
+        });
+        _ttsService.speak(text);
+      }
+    } catch (e) {
+      print("Lỗi OCR: $e");
+    } finally {
+      _isProcessingFrame = false;
+    }
   }
 }

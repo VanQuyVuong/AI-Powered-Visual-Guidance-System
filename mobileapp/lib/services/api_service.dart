@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:http/http.dart' as http;
 
 class ApiService {
   // Đổi IP thành IPv4 của máy tính (VD: 192.168.1.100) nếu chạy trên máy ảo/thiết bị thật
@@ -39,5 +40,34 @@ class ApiService {
   void disconnect() {
     _channel?.sink.close();
     _channel = null;
+  }
+
+  /// Gửi ảnh lên API REST (OCR) để đọc chữ
+  Future<String?> readTextFromImage(List<int> imageBytes) async {
+    // URL REST API thay vì WebSocket
+    final String restUrl = serverUrl.replaceFirst("ws://", "http://").replaceFirst("stream", "read_text");
+    
+    try {
+      var request = http.MultipartRequest('POST', Uri.parse(restUrl));
+      
+      // Đính kèm file ảnh vào body (tham số tên là 'image' theo đúng backend)
+      request.files.add(http.MultipartFile.fromBytes(
+        'image',
+        imageBytes,
+        filename: 'ocr_frame.jpg',
+      ));
+
+      var response = await request.send();
+      if (response.statusCode == 200) {
+        String responseBody = await response.stream.bytesToString();
+        var data = jsonDecode(responseBody);
+        if (data['success'] == true) {
+          return data['text'];
+        }
+      }
+    } catch (e) {
+      print("Lỗi OCR: $e");
+    }
+    return null;
   }
 }
