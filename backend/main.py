@@ -10,6 +10,9 @@ from app.vision.decision_engine import determine_position, generate_guidance, is
 
 app = FastAPI(title="AI Visual Guidance API", version="0.1 (MVP)")
 
+from fastapi.responses import FileResponse
+import os
+
 # Cho phép App trên điện thoại gọi API mà không bị chặn CORS
 app.add_middleware(
     CORSMiddleware,
@@ -17,6 +20,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/")
+async def serve_web_demo():
+    """
+    Phục vụ giao diện Web Demo AI Visual Guidance System & AR Navigation
+    """
+    static_file = os.path.join(os.path.dirname(__file__), "static", "index.html")
+    if os.path.exists(static_file):
+        return FileResponse(static_file)
+    return {"message": "AI Visual Guidance API is running. Web demo not found."}
 
 @app.post("/api/v1/vision/analyze", response_model=VisionAnalyzeResponse)
 async def analyze_image(image: UploadFile = File(...)):
@@ -124,27 +137,41 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Kiểm tra xem người dùng có đang đi trên gạch dẫn đường không
                 is_on_tactile = detect_tactile_paving(image_bytes)
                 
-                final_detections = []
+                all_objects = []
+                roi_detections = []
+                has_person_in_roi = False
+                has_obstacle_in_roi = False
+                
                 for det in raw_detections:
                     box = det["bounding_box"]
-                    
-                    # QUAN TRỌNG: Lọc bằng Vùng An Toàn (ROI)
-                    if not is_in_roi(box["x1"], box["y1"], box["x2"], box["y2"], img_width, img_height):
-                        continue # Bỏ qua, vật thể này an toàn!
-                        
+                    in_corridor = is_in_roi(box["x1"], box["y1"], box["x2"], box["y2"], img_width, img_height)
                     pos = determine_position(box["x1"], box["x2"], img_width)
                     
-                    # Convert to Detection object for generate_guidance compatibility
-                    det_obj = Detection(
-                        class_name=det["class_name"],
-                        confidence=det["confidence"],
-                        position=pos,
-                        bounding_box=BoundingBox(**box)
-                    )
-                    final_detections.append(det_obj)
+                    is_person = (det["class_name"] == "person")
+                    if in_corridor:
+                        if is_person:
+                            has_person_in_roi = True
+                        else:
+                            has_obstacle_in_roi = True
+                            
+                        det_obj = Detection(
+                            class_name=det["class_name"],
+                            confidence=det["confidence"],
+                            position=pos,
+                            bounding_box=BoundingBox(**box)
+                        )
+                        roi_detections.append(det_obj)
+                        
+                    all_objects.append({
+                        "class_name": det["class_name"],
+                        "confidence": det["confidence"],
+                        "position": pos,
+                        "bounding_box": box,
+                        "in_roi": in_corridor
+                    })
                     
-                # 4. Sinh câu tiếng Việt & Thêm cảnh báo lề đường
-                guidance_data = generate_guidance(final_detections) or {"text": "", "priority": "LOW"}
+                # 4. Sinh câu tiếng Việt & Thêm cảnh báo
+                guidance_data = generate_guidance(roi_detections) or {"text": "", "priority": "LOW"}
                 
                 if is_on_tactile:
                     if guidance_data["text"]:
@@ -155,11 +182,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif not guidance_data["text"]:
                     guidance_data["text"] = "An toàn phía trước."
                     
-                # Gửi kết quả về cực nhanh
+                # Gửi kết quả về cực nhanh với kích thước ảnh gốc để frontend căn chỉnh chuẩn xác
                 await websocket.send_json({
                     "success": True,
-                    "objects": [det.model_dump() for det in final_detections],
-                    "guidance": guidance_data
+                    "objects": all_objects,
+                    "has_person_in_roi": has_person_in_roi,
+                    "has_obstacle_in_roi": has_obstacle_in_roi,
+                    "guidance": guidance_data,
+                    "img_size": {"width": img_width, "height": img_height}
                 })
             except Exception as frame_error:
                 # Bắt lỗi từng ảnh riêng lẻ để không làm sập toàn bộ kết nối WebSocket

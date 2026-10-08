@@ -19,23 +19,29 @@ def determine_position(x1: int, x2: int, image_width: int = 640) -> str:
 def is_in_roi(x1: int, y1: int, x2: int, y2: int, img_width: int, img_height: int) -> bool:
     """
     Thuật toán VÙNG QUAN TÂM (Region of Interest - ROI):
-    Lọc bỏ các vật thể nằm ở rìa đường hoặc trên trời. Chỉ cảnh báo vật trong hình quạt trước mặt.
+    Hình thang phối cảnh 3D mô phỏng làn đường an toàn phía trước mặt người đeo kính.
+    - Đáy trên hẹp ở chân trời (rộng 35% ở giữa, tại y = 45% chiều cao)
+    - Đáy dưới mở rộng ở chân người đi (rộng 75% ở giữa, tại y = 100% chiều cao)
+    Chỉ cảnh báo khi điểm chân tiếp đất của vật thể (bottom-center) lọt vào hình thang này.
     """
-    # Lấy tọa độ điểm chạm đất của vật cản (Giữa, dưới cùng của Bounding Box)
-    obj_bottom_x = (x1 + x2) / 2
-    obj_bottom_y = y2
+    obj_bottom_x = (x1 + x2) / 2.0
+    obj_bottom_y = float(y2)
     
-    # 1. Trục Y (Chiều cao): Nếu vật thể lơ lửng ở nửa trên màn hình -> Bỏ qua
-    if obj_bottom_y < (img_height * 0.4):
+    top_y = img_height * 0.45
+    # 1. Trục Y: Nếu vật thể lơ lửng trên cao / móc trên tường -> Bỏ qua, lối đi an toàn
+    if obj_bottom_y < top_y:
         return False
         
-    # 2. Trục X (Chiều ngang): Nếu vật thể nằm tít bên lề trái (dưới 20%) hoặc lề phải (trên 80%) -> Bỏ qua
-    left_margin = img_width * 0.2
-    right_margin = img_width * 0.8
-    if obj_bottom_x < left_margin or obj_bottom_x > right_margin:
-        return False
-        
-    return True
+    center_x = img_width * 0.5
+    top_width = img_width * 0.35
+    bot_width = img_width * 0.75
+    
+    # Tỷ lệ tiến từ đỉnh hình thang xuống đáy (0.0 ở top_y, 1.0 ở đáy màn hình)
+    progress = min(1.0, max(0.0, (obj_bottom_y - top_y) / (img_height - top_y)))
+    cur_half_width = (top_width / 2.0) + progress * ((bot_width - top_width) / 2.0)
+    
+    # Kiểm tra xem tâm chân vật thể có nằm trong phạm vi bề rộng hình thang tại độ sâu đó không
+    return abs(obj_bottom_x - center_x) <= cur_half_width
 
 
 def estimate_distance(y1: int, y2: int, img_height: int) -> str:
@@ -61,37 +67,73 @@ def generate_guidance(detections: list) -> dict:
     if not detections:
         return None
         
-    # Từ điển dịch tên tiếng Anh của YOLO sang tiếng Việt (MVP)
+    # Từ điển dịch tên tiếng Anh của YOLO sang tiếng Việt (COCO 80 classes)
     vocab = {
         "person": "người",
-        "car": "chiếc xe ô tô",
+        "car": "chiếc ô tô",
         "motorcycle": "chiếc xe máy",
         "bicycle": "chiếc xe đạp",
-        "bus": "chiếc xe buýt",
-        "truck": "chiếc xe tải"
+        "bus": "xe buýt",
+        "truck": "xe tải",
+        "chair": "ghế",
+        "couch": "ghế sofa",
+        "table": "bàn",
+        "dining table": "bàn",
+        "bed": "giường",
+        "tv": "màn hình",
+        "laptop": "máy tính",
+        "bottle": "chai nước",
+        "cup": "cốc nước",
+        "backpack": "ba lô",
+        "handbag": "túi xách",
+        "suitcase": "vali",
+        "cell phone": "điện thoại",
+        "potted plant": "chậu cây",
+        "dog": "con chó",
+        "cat": "con mèo",
+        "traffic light": "đèn tín hiệu",
+        "stop sign": "biển báo",
+        "fire hydrant": "trụ nước",
+        "door": "cửa",
+        "stair": "bậc thang",
+        "stairs": "cầu thang"
     }
     
     parts = []
+    has_person = False
     for det in detections:
-        if det.confidence < 0.5:
+        if det.confidence < 0.45:
             continue
             
-        name_vn = vocab.get(det.class_name, det.class_name)
-        dist_str = f", {det.distance}" if hasattr(det, 'distance') and det.distance else ""
+        name_vn = vocab.get(det.class_name, "vật cản")
+        if det.class_name == "person":
+            has_person = True
+            
+        # Ước lượng khoảng cách
+        dist_text = ""
+        if hasattr(det, 'bounding_box') and det.bounding_box:
+            h = det.bounding_box.y2 - det.bounding_box.y1
+            if h > 300:
+                dist_text = " khoảng cách rất gần"
+            elif h > 150:
+                dist_text = " khoảng 1 đến 2 mét"
+            else:
+                dist_text = " khoảng 3 mét"
         
         if det.position == "left":
-            parts.append(f"bên trái có {name_vn}{dist_str}")
+            parts.append(f"bên trái có {name_vn}{dist_text}")
         elif det.position == "right":
-            parts.append(f"bên phải có {name_vn}{dist_str}")
+            parts.append(f"bên phải có {name_vn}{dist_text}")
         else:
-            parts.append(f"phía trước có {name_vn}{dist_str}")
+            parts.append(f"ngay phía trước có {name_vn}{dist_text}")
             
     if not parts:
         return None
         
-    text = " và ".join(parts).capitalize() + "."
+    text = "Cảnh báo, " + " và ".join(parts[:2]) + "."
     
     return {
         "text": text,
-        "priority": "HIGH" if "phía trước" in text.lower() else "MEDIUM"
+        "has_person": has_person,
+        "priority": "HIGH" if "phía trước" in text.lower() or has_person else "MEDIUM"
     }
