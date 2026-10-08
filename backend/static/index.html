@@ -854,6 +854,36 @@
         }
 
         // ==========================================
+        // HÀM DỪNG VÀ HỦY TRIỆT ĐỂ MỌI ÂM THANH / GIỌNG NÓI
+        // ==========================================
+        let ttsAbortController = null;
+
+        function stopAllVoiceAndAudio() {
+            // 1. Dừng ngay lập tức audio streaming HTML5 Audio
+            if (audioPlayer) {
+                audioPlayer.pause();
+                audioPlayer.currentTime = 0;
+                audioPlayer.removeAttribute('src');
+                audioPlayer.load();
+            }
+
+            // 2. Hủy toàn bộ hàng đợi Web SpeechSynthesis nếu có
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+            }
+
+            // 3. Hủy bỏ bất kỳ fetch HTTP request đang dở dang
+            if (ttsAbortController) {
+                ttsAbortController.abort();
+                ttsAbortController = null;
+            }
+
+            // 4. Cập nhật giao diện trạng thái giọng nói
+            const voiceStatus = document.getElementById("voiceStatusText");
+            if (voiceStatus) voiceStatus.innerText = "ĐÃ TẮT";
+        }
+
+        // ==========================================
         // HÀM ĐỌC GIỌNG NÓI TIẾNG VIỆT QUA FASTAPI PROXY BLAZE
         // ==========================================
         let lastSpeakTime = 0;
@@ -861,11 +891,16 @@
         let audioPlayer = new Audio();
 
         async function speakBlaze(text, priority = "MEDIUM") {
-            const now = Date.now();
-            if (now - lastSpeakTime < 3000 && text === lastSpokenText && priority !== "FORCE") {
+            // NẾU CAMERA ĐANG TẮT VÀ ĐÂY KHÔNG PHẢI LÀ NÚT THỬ GIỌNG -> CHẶN TRIỆT ĐỂ!
+            if (!isCamActive && priority !== "TEST") {
                 return;
             }
-            if (now - lastSpeakTime < 1800 && priority !== "FORCE") {
+
+            const now = Date.now();
+            if (now - lastSpeakTime < 3000 && text === lastSpokenText && priority !== "FORCE" && priority !== "TEST") {
+                return;
+            }
+            if (now - lastSpeakTime < 1800 && priority !== "FORCE" && priority !== "TEST") {
                 return;
             }
             lastSpeakTime = now;
@@ -875,11 +910,18 @@
             if (voiceStatus) voiceStatus.innerText = "ĐANG ĐỌC...";
             addLog("alert-info", `[VOICE TIẾNG VIỆT] "${text}"`);
 
+            // Chuẩn bị AbortController để nếu user bấm dừng camera trong lúc đang fetch -> hủy ngay!
+            if (ttsAbortController) {
+                ttsAbortController.abort();
+            }
+            ttsAbortController = new AbortController();
+
             try {
                 // 1. GỌI QUA BACKEND FASTAPI PROXY (KÈM TOKEN BLAZE)
                 const res = await fetch("/api/v1/voice/tts", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
+                    signal: ttsAbortController.signal,
                     body: JSON.stringify({
                         text: text,
                         speaker_id: "HN-Nam-2-BL",
@@ -887,19 +929,38 @@
                     })
                 });
 
+                // Kiểm tra lại sau khi fetch xong (phòng khi user vừa bấm Dừng)
+                if (!isCamActive && priority !== "TEST") {
+                    stopAllVoiceAndAudio();
+                    return;
+                }
+
                 if (res.ok) {
                     const data = await res.json();
                     if (data && data.audio_url) {
+                        if (!isCamActive && priority !== "TEST") {
+                            stopAllVoiceAndAudio();
+                            return;
+                        }
                         audioPlayer.src = data.audio_url;
                         await audioPlayer.play();
                         audioPlayer.onended = () => {
-                            if (voiceStatus) voiceStatus.innerText = "SẴN SÀNG";
+                            if (voiceStatus) voiceStatus.innerText = isCamActive ? "SẴN SÀNG" : "ĐÃ TẮT";
                         };
                         return;
                     }
                 }
             } catch (err) {
+                if (err.name === 'AbortError') {
+                    return;
+                }
                 console.warn("Backend TTS stream error, using client fallback:", err);
+            }
+
+            // Kiểm tra lại trước khi kích hoạt bộ đọc fallback
+            if (!isCamActive && priority !== "TEST") {
+                stopAllVoiceAndAudio();
+                return;
             }
 
             // 2. NẾU MẤT MẠNG HOẶC OFFLINE: Fallback bộ đọc tiếng Việt chuẩn
@@ -913,7 +974,7 @@
                 utter.rate = 1.0;
                 window.speechSynthesis.speak(utter);
             }
-            if (voiceStatus) voiceStatus.innerText = "SẴN SÀNG";
+            if (voiceStatus) voiceStatus.innerText = isCamActive ? "SẴN SÀNG" : "ĐÃ TẮT";
         }
 
         // ==========================================
@@ -1088,18 +1149,55 @@
 
         async function toggleCamera() {
             if (isCamActive) {
+                isCamActive = false; // Ngắt cờ camera ngay lập tức
+
+                // 🛑 TẮT TRIỆT ĐỂ TOÀN BỘ ÂM THANH & GIỌNG ĐỌC ĐANG CHẠY / ĐANG CHỜ
+                stopAllVoiceAndAudio();
+
                 if (video.srcObject) {
                     video.srcObject.getTracks().forEach(t => t.stop());
+                    video.srcObject = null;
                 }
-                isCamActive = false;
+
                 btnToggleCam.innerHTML = "<span>📹</span> Bật Camera AI";
                 btnToggleCam.classList.remove('btn-danger');
                 btnToggleCam.classList.add('btn-primary');
                 bannerText.innerText = "Camera đã dừng. Bấm để bật lại.";
                 bannerIcon.innerText = "⏸️";
-                if (ws) ws.close();
+
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+
+                // Xóa sạch dữ liệu nhận diện và cờ giả lập
+                backendDetections = [];
+                simulatedPersonActive = false;
+                simulatedObstacleActive = false;
+
+                const btnPer = document.getElementById('btnSimulatePerson');
+                if (btnPer) {
+                    btnPer.style.borderColor = "rgba(255, 255, 255, 0.15)";
+                    btnPer.style.color = "var(--text-main)";
+                    btnPer.innerHTML = "<span>👤</span> Giả Lập Người (1.2m)";
+                }
+                const btnObs = document.getElementById('btnSimulateObstacle');
+                if (btnObs) {
+                    btnObs.style.borderColor = "rgba(255, 255, 255, 0.15)";
+                    btnObs.style.color = "var(--text-main)";
+                    btnObs.innerHTML = "<span>📦</span> Giả Lập Vật Cản (0.8m)";
+                }
+
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
-                addLog("alert-warn", "[CAMERA] Đã dừng Camera.");
+                safeStatus.innerText = "⏸️ CAMERA: ĐÃ DỪNG";
+                safeStatus.style.color = "var(--text-muted)";
+                objCount.innerText = "VẬT CẢN TRONG LÀN: 0";
+                if (hudMotionBadge) {
+                    hudMotionBadge.innerText = "⏸️ CAMERA ĐÃ DỪNG";
+                    hudMotionBadge.className = "hud-corner hud-top-center";
+                }
+
+                addLog("alert-warn", "[CAMERA] Đã dừng toàn bộ Camera & Tắt âm thanh.");
             } else {
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({
@@ -1320,6 +1418,11 @@
 
         // HÀM KÍCH HOẠT BƯỚC ĐI TỚI (LẮC DỌC CAMERA)
         function triggerCameraStep(source = "manual") {
+            if (!isCamActive) {
+                showMotionBadge("⚠️ HÃY BẬT CAMERA AI TRƯỚC!");
+                return;
+            }
+
             const now = performance.now();
             if (now - lastStepTriggerTime < 700) return; // Cooldown 700ms
             lastStepTriggerTime = now;
@@ -1360,6 +1463,11 @@
 
         // HÀM KÍCH HOẠT RẼ HƯỚNG (QUAY TRÁI / PHẢI)
         function triggerCameraTurn(direction, source = "manual") {
+            if (!isCamActive) {
+                showMotionBadge("⚠️ HÃY BẬT CAMERA AI TRƯỚC!");
+                return;
+            }
+
             const now = performance.now();
             if (now - lastTurnTriggerTime < 1400) return; // Cooldown 1.4s
             lastTurnTriggerTime = now;
@@ -1901,12 +2009,14 @@
             updateNavigationState();
             const step = simulatedRoute[currentStepIdx];
             addLog("alert-info", `[GPS] Tiến bước: "${step.title}"`);
-            speakBlaze(step.voiceStart || step.voicePrompt || step.title, "FORCE");
+            if (isCamActive) {
+                speakBlaze(step.voiceStart || step.voicePrompt || step.title, "FORCE");
+            }
         });
 
-        // 5. Nút thử giọng Blaze
+        // 5. Nút thử giọng Blaze (Chỉ nút này được phép đọc khi Camera chưa bật)
         document.getElementById('btnTestVoice').addEventListener('click', () => {
-            speakBlaze("Xin chào! Tôi là trợ lý thị giác thông minh. Lối đi phía trước an toàn, hãy tiếp tục đi thẳng.", "FORCE");
+            speakBlaze("Xin chào! Tôi là trợ lý thị giác thông minh. Lối đi phía trước an toàn, hãy tiếp tục đi thẳng.", "TEST");
         });
 
         // 6. Nút giả lập người (1.2m)
@@ -1919,7 +2029,9 @@
                 btn.style.color = "var(--neon-red)";
                 btn.innerHTML = "<span>❌</span> Hủy Giả Lập Người";
                 addLog("alert-danger", "[CẢNH BÁO] Có người xuất hiện ở cự ly gần 1.2 mét!");
-                speakBlaze("Cảnh báo, có người ở ngay trước mặt cách 1.2 mét, hãy dừng lại!", "FORCE");
+                if (isCamActive) {
+                    speakBlaze("Cảnh báo, có người ở ngay trước mặt cách 1.2 mét, hãy dừng lại!", "FORCE");
+                }
             } else {
                 btn.style.borderColor = "rgba(255, 255, 255, 0.15)";
                 btn.style.color = "var(--text-main)";
@@ -1938,7 +2050,9 @@
                 btn.style.color = "var(--neon-amber)";
                 btn.innerHTML = "<span>❌</span> Hủy Giả Lập Vật Cản";
                 addLog("alert-warn", "[CẢNH BÁO] Có vật cản xuất hiện ở cự ly gần 0.8 mét!");
-                speakBlaze("Cảnh báo, có vật cản ở ngay trước mặt cách 0.8 mét, chú ý bước chân!", "FORCE");
+                if (isCamActive) {
+                    speakBlaze("Cảnh báo, có vật cản ở ngay trước mặt cách 0.8 mét, chú ý bước chân!", "FORCE");
+                }
             } else {
                 btn.style.borderColor = "rgba(255, 255, 255, 0.15)";
                 btn.style.color = "var(--text-main)";
