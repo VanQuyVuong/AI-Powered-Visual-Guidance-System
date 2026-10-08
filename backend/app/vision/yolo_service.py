@@ -2,9 +2,13 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
+import os
+
 # Tải model ở ngoài hàm để nó chỉ load 1 lần khi bật server, không load lại mỗi khi có request
 print("Đang khởi tạo model YOLO...")
-model = YOLO('yolov8n.pt')
+model_file = 'guidance_model.pt' if os.path.exists('guidance_model.pt') else 'yolov8n.pt'
+print(f"Sử dụng model: {model_file}")
+model = YOLO(model_file)
 
 def run_inference(image_bytes: bytes):
     """
