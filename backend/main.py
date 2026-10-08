@@ -3,10 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import base64
 
+from pydantic import BaseModel
+from typing import Optional
+
 # Import các thành phần chúng ta vừa tạo
 from app.schemas.vision import VisionAnalyzeResponse, Detection, Guidance, BoundingBox
 from app.vision.yolo_service import run_inference, run_tracking
 from app.vision.decision_engine import determine_position, generate_guidance, is_in_roi
+from app.services.blaze_service import blaze_service
 
 app = FastAPI(title="AI Visual Guidance API", version="0.1 (MVP)")
 
@@ -92,6 +96,35 @@ async def read_text_api(image: UploadFile = File(...)):
         "success": True,
         "text": text
     }
+
+# ==========================================
+# API GIỌNG NÓI TIẾNG VIỆT (BLAZE.VN TTS & STT)
+# ==========================================
+class TtsRequest(BaseModel):
+    text: str
+    speaker_id: Optional[str] = "HN-Nam-2-BL"
+    audio_speed: Optional[str] = "1"
+
+@app.post("/api/v1/voice/tts")
+async def voice_tts(request: TtsRequest):
+    """
+    Chuyển văn bản thành giọng nói tiếng Việt tự nhiên (Blaze TTS v1.5_pro)
+    """
+    result = blaze_service.text_to_speech(
+        text=request.text,
+        speaker_id=request.speaker_id,
+        audio_speed=request.audio_speed
+    )
+    return result
+
+@app.post("/api/v1/voice/stt")
+async def voice_stt(audio_file: UploadFile = File(...)):
+    """
+    Nhận diện giọng nói tiếng Việt từ file ghi âm thành văn bản (Blaze STT v1.0)
+    """
+    contents = await audio_file.read()
+    result = blaze_service.speech_to_text(contents, filename=audio_file.filename or "audio.wav")
+    return result
 
 # ==========================================
 # WEBSOCKET CHO REAL-TIME VIDEO TRACKING

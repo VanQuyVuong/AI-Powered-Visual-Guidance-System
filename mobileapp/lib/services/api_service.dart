@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 
 class ApiService {
   // Đổi IP thành IPv4 của máy tính (VD: 192.168.1.100) nếu chạy trên máy ảo/thiết bị thật
-  final String serverUrl = "ws://10.0.2.2:8000/api/v1/vision/stream";
+  final String serverUrl = "ws://192.168.1.237:8000/api/v1/vision/stream";
   WebSocketChannel? _channel;
 
   /// Kết nối tới Backend qua WebSocket
