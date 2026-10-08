@@ -86,23 +86,23 @@
                 if(res.objects && res.objects.length > 0) {
                     const objTexts = [];
                     res.objects.forEach(obj => {
-                        objTexts.push(`[ID:${obj.id}] ${obj.class} (${obj.position})`);
+                        objTexts.push(`[${obj.class_name}] (${obj.position})`);
                         
                         // Vẽ khung đỏ báo động
-                        if(obj.box) {
+                        if(obj.bounding_box) {
                             ctx.strokeStyle = "red";
                             ctx.lineWidth = 3;
                             ctx.strokeRect(
-                                obj.box.x1, 
-                                obj.box.y1, 
-                                obj.box.x2 - obj.box.x1, 
-                                obj.box.y2 - obj.box.y1
+                                obj.bounding_box.x1, 
+                                obj.bounding_box.y1, 
+                                obj.bounding_box.x2 - obj.bounding_box.x1, 
+                                obj.bounding_box.y2 - obj.bounding_box.y1
                             );
                             
                             // Vẽ tên
                             ctx.fillStyle = "red";
                             ctx.font = "bold 20px Arial";
-                            ctx.fillText(`ID:${obj.id} ${obj.class}`, obj.box.x1, obj.box.y1 - 5);
+                            ctx.fillText(`${obj.class_name}`, obj.bounding_box.x1, obj.bounding_box.y1 - 5);
                         }
                     });
                     logs.innerHTML = `<span style="color:yellow">CẢNH BÁO: ${objTexts.join(", ")}</span><br>` + logs.innerHTML;
