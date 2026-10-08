@@ -6,7 +6,13 @@ import os
 
 # Tải model ở ngoài hàm để nó chỉ load 1 lần khi bật server, không load lại mỗi khi có request
 print("Đang khởi tạo model YOLO...")
-model_file = 'guidance_model.pt' if os.path.exists('guidance_model.pt') else 'yolov8n.pt'
+if os.path.exists('guidance_model.onnx'):
+    model_file = 'guidance_model.onnx'
+elif os.path.exists('guidance_model.pt'):
+    model_file = 'guidance_model.pt'
+else:
+    model_file = 'yolov8n.pt'
+    
 print(f"Sử dụng model: {model_file}")
 model = YOLO(model_file)
 
