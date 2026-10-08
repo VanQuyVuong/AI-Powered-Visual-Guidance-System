@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Visual Guidance System - Trợ Lý Dẫn Đường Thị Giác & AR</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <!-- Leaflet CSS for GPS Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --bg-dark: #0b0f19;
+            --bg-card: rgba(18, 26, 43, 0.88);
+            --border-glow: rgba(0, 240, 255, 0.3);
+            --neon-cyan: #00f0ff;
+            --neon-green: #00ff88;
+            --neon-red: #ff3366;
+            --neon-amber: #ffb703;
+            --text-main: #f0f4fc;
+            --text-muted: #8c9cb8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(0, 240, 255, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(0, 255, 136, 0.05) 0%, transparent 40%);
+        }
+
+        /* HEADER */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 28px;
+            background: rgba(11, 15, 25, 0.92);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-glow);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--neon-cyan), var(--neon-green));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
+        }
+
+        .brand h1 {
+            font-size: 1.2rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            background: linear-gradient(90deg, #fff, var(--neon-cyan));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand span {
+            font-size: 0.72rem;
+            color: var(--neon-green);
+            font-family: 'JetBrains Mono', monospace;
+            text-transform: uppercase;
+        }
+
+        .sys-status-pills {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-family: 'JetBrains Mono', monospace;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-muted);
+        }
+
+        .pill.active {
+            border-color: var(--neon-cyan);
+            color: #fff;
+            background: rgba(0, 240, 255, 0.1);
+        }
+
+        .dot-pulse {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--neon-green);
+            box-shadow: 0 0 8px var(--neon-green);
+            animation: pulseDot 1.5s infinite;
+        }
+
+        @keyframes pulseDot {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            50% { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.7; }
+        }
+
+        /* DASHBOARD LAYOUT */
+        .dashboard-container {
+            display: grid;
+            grid-template-columns: 1.45fr 1fr;
+            gap: 20px;
+            padding: 20px 28px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        @media (max-width: 1024px) {
+            .dashboard-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .glass-panel {
+            background: var(--bg-card);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-glow);
+            border-radius: 16px;
+            padding: 18px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+        }
+
+        /* CAMERA / AR VIEWPORT */
+        .viewport-section {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            height: 520px;
+            background: #000;
+            border-radius: 14px;
+            overflow: hidden;
+            border: 2px solid rgba(0, 240, 255, 0.35);
+            box-shadow: 0 0 30px rgba(0, 240, 255, 0.15);
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            /* MẶC ĐỊNH: Không lật gương (Góc nhìn thực tế POV của kính thông minh) */
+            transition: transform 0.3s ease;
+        }
+
+        video.mirrored {
+            transform: scaleX(-1);
+        }
+
+        canvas#arOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            transition: transform 0.3s ease;
+        }
+
+        canvas#arOverlay.mirrored {
+            transform: scaleX(-1);
+        }
+
+        /* HUD OVERLAYS */
+        .hud-corner {
+            position: absolute;
+            z-index: 20;
+            padding: 8px 14px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.78rem;
+            background: rgba(11, 15, 25, 0.85);
+            backdrop-filter: blur(8px);
+            border-radius: 8px;
+            border: 1px solid rgba(0, 240, 255, 0.2);
+        }
+
+        .hud-top-left { top: 14px; left: 14px; color: var(--neon-cyan); }
+        .hud-top-right { top: 14px; right: 14px; }
+
+        .hud-bottom-banner {
+            position: absolute;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20;
+            background: rgba(11, 15, 25, 0.92);
+            backdrop-filter: blur(12px);
+            padding: 10px 24px;
+            border-radius: 30px;
+            border: 1px solid var(--neon-green);
+            font-size: 1rem;
+            font-weight: 600;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 0 25px rgba(0, 255, 136, 0.3);
+            white-space: nowrap;
+            transition: all 0.3s ease;
+        }
+
+        .hud-bottom-banner.hazard-person {
+            border-color: var(--neon-red);
+            box-shadow: 0 0 30px rgba(255, 51, 102, 0.65);
+            background: rgba(255, 51, 102, 0.3);
+            animation: pulseRed 0.8s infinite alternate;
+        }
+
+        .hud-bottom-banner.hazard-obstacle {
+            border-color: var(--neon-amber);
+            box-shadow: 0 0 25px rgba(255, 183, 3, 0.6);
+            background: rgba(255, 183, 3, 0.25);
+            animation: pulseAmber 0.8s infinite alternate;
+        }
+
+        @keyframes pulseRed {
+            0% { transform: translateX(-50%) scale(0.98); }
+            100% { transform: translateX(-50%) scale(1.02); }
+        }
+
+        @keyframes pulseAmber {
+            0% { transform: translateX(-50%) scale(0.98); }
+            100% { transform: translateX(-50%) scale(1.01); }
+        }
+
+        /* CONTROLS ROW */
+        .controls-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 8px;
+        }
+
+        .btn-hud {
+            padding: 10px 12px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            border: 1px solid transparent;
+            text-align: center;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, rgba(0, 240, 255, 0.25), rgba(0, 255, 136, 0.25));
+            border-color: var(--neon-cyan);
+            color: #fff;
+        }
+        .btn-primary:hover {
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.5);
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.15);
+            color: var(--text-main);
+        }
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: var(--neon-cyan);
+            color: #fff;
+        }
+
+        .btn-danger {
+            background: rgba(255, 51, 102, 0.2);
+            border-color: var(--neon-red);
+            color: #fff;
+        }
+
+        /* SIDE SECTION */
+        .side-section {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .map-card {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .card-header h2 {
+            font-size: 0.98rem;
+            font-weight: 700;
+            color: var(--neon-cyan);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #gpsMap {
+            width: 100%;
+            height: 200px;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            z-index: 1;
+        }
+
+        .route-info-box {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+        }
+
+        .nav-step-highlight {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(0, 240, 255, 0.08);
+            border-left: 4px solid var(--neon-cyan);
+            padding: 10px 14px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .nav-icon {
+            font-size: 24px;
+            color: var(--neon-cyan);
+        }
+
+        .nav-text strong {
+            display: block;
+            color: #fff;
+            font-size: 0.92rem;
+        }
+
+        .nav-text small {
+            color: var(--text-muted);
+            font-size: 0.78rem;
+        }
+
+        /* VOICE & LOGS */
+        .voice-card {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .voice-meta {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            font-size: 0.78rem;
+        }
+
+        .meta-box {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .meta-box span { color: var(--text-muted); display: block; font-size: 0.7rem; }
+        .meta-box b { color: var(--neon-green); font-family: 'JetBrains Mono', monospace; }
+
+        .logs-scroll {
+            height: 130px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.45);
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .log-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 3px 6px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .log-item.alert-danger { color: var(--neon-red); border-left: 2px solid var(--neon-red); }
+        .log-item.alert-warn { color: var(--neon-amber); border-left: 2px solid var(--neon-amber); }
+        .log-item.alert-info { color: var(--neon-cyan); border-left: 2px solid var(--neon-cyan); }
+
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-thumb { background: rgba(0, 240, 255, 0.3); border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <!-- HEADER BAR -->
+    <header>
+        <div class="brand">
+            <div class="brand-icon">👁️</div>
+            <div>
+                <h1>AI VISUAL GUIDANCE SYSTEM</h1>
+                <span>Smart Helmet & Glasses Assistive AR HUD</span>
+            </div>
+        </div>
+
+        <div class="sys-status-pills">
+            <div class="pill active" id="pillAi">
+                <div class="dot-pulse"></div>
+                <span>YOLOv8 + ROI 3D</span>
+            </div>
+            <div class="pill active" id="pillVoice">
+                <span>🎙️ Blaze TTS (Tiếng Việt Chuẩn)</span>
+            </div>
+            <div class="pill" id="pillGps">
+                <span>🛰️ GPS NAV: ON</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- DASHBOARD CONTAINER -->
+    <main class="dashboard-container">
+        
+        <!-- CỘT TRÁI: CAMERA & GÓC NHÌN AR THỜI GIAN THỰC -->
+        <section class="viewport-section">
+            <div class="video-wrapper">
+                <video id="webcam" autoplay playsinline muted></video>
+                <canvas id="arOverlay"></canvas>
+
+                <!-- HUD BADGES GÓC MÀN HÌNH -->
+                <div class="hud-corner hud-top-left">
+                    <div>FOV: 110° HUD ACTIVE</div>
+                    <div id="fpsCounter">FPS: 30 • LATENCY: 16ms</div>
+                </div>
+
+                <div class="hud-corner hud-top-right">
+                    <div id="safeStatus" style="color: var(--neon-green); font-weight: 600;">LỐI ĐI: AN TOÀN</div>
+                    <div id="objCount" style="color: var(--text-muted);">VẬT CẢN TRONG LÀN: 0</div>
+                </div>
+
+                <!-- BANNER CẢNH BÁO / CHỈ DẪN TRUNG TÂM -->
+                <div class="hud-bottom-banner" id="mainBanner">
+                    <span id="bannerIcon">⬆️</span>
+                    <span id="bannerText">Lối đi an toàn. Tiếp tục đi thẳng theo mũi tên.</span>
+                </div>
+            </div>
+
+            <!-- THANH ĐIỀU KHIỂN DƯỚI CAMERA -->
+            <div class="controls-row">
+                <button class="btn-hud btn-primary" id="btnToggleCam">
+                    <span>📹</span> Bật Camera AI
+                </button>
+                <button class="btn-hud btn-secondary" id="btnNextStep">
+                    <span>🚶</span> Đổi Hướng Mũi Tên GPS
+                </button>
+                <button class="btn-hud btn-secondary" id="btnTestVoice">
+                    <span>🔊</span> Thử Giọng Blaze Tiếng Việt
+                </button>
+                <button class="btn-hud btn-secondary" id="btnSimulatePerson">
+                    <span>👤</span> Giả Lập Có Người
+                </button>
+                <button class="btn-hud btn-secondary" id="btnSimulateObstacle">
+                    <span>📦</span> Giả Lập Có Vật Cản
+                </button>
+                <button class="btn-hud btn-secondary" id="btnToggleMirror">
+                    <span>🔄</span> Đổi Góc Nhìn POV
+                </button>
+            </div>
+        </section>
+
+        <!-- CỘT PHẢI: BẢN ĐỒ GPS MÔ PHỎNG & TRỢ LÝ GIỌNG NÓI -->
+        <aside class="side-section">
+            
+            <!-- CARD BẢN ĐỒ GPS -->
+            <div class="glass-panel map-card">
+                <div class="card-header">
+                    <h2>🗺️ BẢN ĐỒ DẪN ĐƯỜNG GPS</h2>
+                    <span style="font-size: 0.75rem; color: var(--neon-cyan);">OPENSTREETMAP</span>
+                </div>
+
+                <div id="gpsMap"></div>
+
+                <div class="route-info-box">
+                    <div>Lộ trình: <b>Trạm Xe Buýt Bến Thành</b></div>
+                    <div>Còn lại: <b id="distRemain" style="color: var(--neon-cyan);">85 m</b></div>
+                </div>
+
+                <div class="nav-step-highlight">
+                    <div class="nav-icon" id="stepIcon">⬆️</div>
+                    <div class="nav-text">
+                        <strong id="stepTitle">Đi thẳng 25 mét</strong>
+                        <small id="stepSub">Giữ đúng vạch xúc giác màu vàng trên camera</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CARD TRỢ LÝ GIỌNG NÓI & LOGS -->
+            <div class="glass-panel voice-card">
+                <div class="card-header">
+                    <h2>🎙️ GIỌNG NÓI TIẾNG VIỆT (BLAZE.VN)</h2>
+                    <span style="font-size: 0.75rem; color: var(--neon-green);">API ACTIVE</span>
+                </div>
+
+                <div class="voice-meta">
+                    <div class="meta-box">
+                        <span>MODEL TTS:</span>
+                        <b>v1.5_pro</b>
+                    </div>
+                    <div class="meta-box">
+                        <span>GIỌNG ĐỌC:</span>
+                        <b>HN-Nam-2-BL (Chuẩn VN)</b>
+                    </div>
+                    <div class="meta-box">
+                        <span>ĐỘ TRỄ VOICE:</span>
+                        <b>~0.3s (Backend Proxy)</b>
+                    </div>
+                    <div class="meta-box">
+                        <span>TRẠNG THÁI:</span>
+                        <b id="voiceStatusText">SẴN SÀNG</b>
+                    </div>
+                </div>
+
+                <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-top: 2px;">
+                    NHẬT KÝ CẢNH BÁO THỜI GIAN THỰC:
+                </div>
+
+                <div class="logs-scroll" id="logsContainer">
+                    <div class="log-item alert-info">
+                        <span>[HỆ THỐNG]</span> Khởi tạo thành công mô đun Vision & GPS Simulator.
+                    </div>
+                </div>
+            </div>
+
+        </aside>
+
+    </main>
+
+    <!-- Leaflet JS for Map -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // ==========================================
+        // TỪ ĐIỂN TÊN VẬT CẢN TIẾNG VIỆT
+        // ==========================================
+        const VN_DICT = {
+            "person": "người",
+            "chair": "ghế",
+            "table": "bàn",
+            "dining table": "bàn ăn",
+            "couch": "ghế sofa",
+            "bed": "giường",
+            "backpack": "ba lô",
+            "handbag": "túi xách",
+            "suitcase": "vali",
+            "bottle": "chai nước",
+            "cup": "cốc nước",
+            "laptop": "máy tính",
+            "cell phone": "điện thoại",
+            "tv": "màn hình",
+            "car": "ô tô",
+            "motorcycle": "xe máy",
+            "bicycle": "xe đạp",
+            "dog": "con chó",
+            "cat": "con mèo",
+            "potted plant": "chậu cây",
+            "door": "cửa",
+            "stair": "bậc thang",
+            "stairs": "cầu thang"
+        };
+
+        function getVietnameseName(className) {
+            const raw = (className || "").toLowerCase();
+            return VN_DICT[raw] || raw || "vật cản";
+        }
+
+        // ==========================================
+        // HÀM ĐỌC GIỌNG NÓI TIẾNG VIỆT QUA BACKEND (BLAZE.VN TTS)
+        // ==========================================
+        let lastSpeakTime = 0;
+        let lastSpokenText = "";
+        let audioPlayer = new Audio();
+
+        async function speakBlaze(text, priority = "MEDIUM") {
+            const now = Date.now();
+            // Tránh spam cùng 1 câu nói trong vòng 4 giây
+            if (now - lastSpeakTime < 4000 && text === lastSpokenText && priority !== "FORCE") {
+                return;
+            }
+            if (now - lastSpeakTime < 2500 && priority !== "FORCE") {
+                return;
+            }
+            lastSpeakTime = now;
+            lastSpokenText = text;
+
+            const voiceStatus = document.getElementById("voiceStatusText");
+            if (voiceStatus) voiceStatus.innerText = "ĐANG ĐỌC...";
+            addLog("alert-info", `[VOICE TIẾNG VIỆT] "${text}"`);
+
+            try {
+                // 1. GỌI QUA BACKEND FASTAPI PROXY (BLAZE.VN API KEY: 68f5578def0d2c60d7cd49e9743f0c27ede87304)
+                const res = await fetch("/api/v1/voice/tts", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        text: text,
+                        speaker_id: "HN-Nam-2-BL",
+                        audio_speed: "1"
+                    })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.audio_url) {
+                        audioPlayer.src = data.audio_url;
+                        await audioPlayer.play();
+                        audioPlayer.onended = () => {
+                            if (voiceStatus) voiceStatus.innerText = "SẴN SÀNG";
+                        };
+                        return;
+                    }
+                }
+            } catch (err) {
+                console.warn("Backend TTS proxy error, trying browser fallback:", err);
+            }
+
+            // 2. FALLBACK: NẾU OFFLINE HOẶC MẤT MẠNG, DÙNG BỘ ĐỌC TRÌNH DUYỆT (CHỈ TIẾNG VIỆT)
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const utter = new SpeechSynthesisUtterance(text);
+                utter.lang = 'vi-VN';
+                const voices = window.speechSynthesis.getVoices();
+                const viVoice = voices.find(v => v.lang.includes('vi') || v.lang.includes('VN'));
+                if (viVoice) utter.voice = viVoice;
+                utter.rate = 1.0;
+                window.speechSynthesis.speak(utter);
+            }
+            if (voiceStatus) voiceStatus.innerText = "SẴN SÀNG";
+        }
+
+        // ==========================================
+        // KHỞI TẠO BẢN ĐỒ GPS MÔ PHỎNG (LEAFLET)
+        // ==========================================
+        const initialCoords = [10.7725, 106.6980];
+        const map = L.map('gpsMap', { zoomControl: false }).setView(initialCoords, 18);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        // Tuyến đường mô phỏng (4 chặng đi bộ)
+        const simulatedRoute = [
+            { lat: 10.7725, lng: 106.6980, step: "Đi thẳng 25 mét", sub: "Lối đi phía trước thông thoáng", dir: "STRAIGHT", icon: "⬆️", dist: "85 m", voice: "Đi thẳng hai mươi lăm mét, lối đi thông thoáng." },
+            { lat: 10.7727, lng: 106.6980, step: "Chuẩn bị rẽ trái sau 5 mét", sub: "Rẽ trái theo vạch xúc giác", dir: "LEFT", icon: "↰", dist: "60 m", voice: "Chuẩn bị rẽ trái sau năm mét." },
+            { lat: 10.7727, lng: 106.6976, step: "Đi thẳng 30 mét", sub: "Mặt đường bằng phẳng, an toàn", dir: "STRAIGHT", icon: "⬆️", dist: "30 m", voice: "Đi thẳng ba mươi mét, tiếp tục giữ đúng vạch dẫn đường." },
+            { lat: 10.7729, lng: 106.6976, step: "Rẽ phải - Đã tới trạm xe buýt", sub: "Trạm Xe Buýt Bến Thành ở ngay bên phải", dir: "RIGHT", icon: "↱", dist: "5 m", voice: "Rẽ phải, bạn đã tới trạm xe buýt Bến Thành." }
+        ];
+
+        let currentStepIdx = 0;
+
+        const latlngs = simulatedRoute.map(p => [p.lat, p.lng]);
+        L.polyline(latlngs, {
+            color: '#00f0ff',
+            weight: 5,
+            opacity: 0.85,
+            dashArray: '8, 8'
+        }).addTo(map);
+
+        const userIcon = L.divIcon({
+            className: 'custom-user-marker',
+            html: '<div style="width:16px;height:16px;background:#00ff88;border-radius:50%;box-shadow:0 0 15px #00ff88;border:2px solid #fff;"></div>',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8]
+        });
+
+        const userMarker = L.marker(initialCoords, { icon: userIcon }).addTo(map);
+
+        const destIcon = L.divIcon({
+            className: 'custom-dest-marker',
+            html: '<div style="font-size:22px;">📍</div>',
+            iconSize: [22, 22],
+            iconAnchor: [11, 22]
+        });
+        L.marker([10.7729, 106.6976], { icon: destIcon }).addTo(map);
+
+        function addLog(typeClass, message) {
+            const container = document.getElementById("logsContainer");
+            if (!container) return;
+            const timeStr = new Date().toLocaleTimeString('vi-VN');
+            const item = document.createElement("div");
+            item.className = `log-item ${typeClass}`;
+            item.innerHTML = `<span>[${timeStr}]</span> ${message}`;
+            container.insertBefore(item, container.firstChild);
+            if (container.children.length > 30) container.removeChild(container.lastChild);
+        }
+
+        // ==========================================
+        // WEBCAM & AR CANVAS RENDERING
+        // ==========================================
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('arOverlay');
+        const ctx = canvas.getContext('2d');
+        const btnToggleCam = document.getElementById('btnToggleCam');
+        const btnToggleMirror = document.getElementById('btnToggleMirror');
+        const mainBanner = document.getElementById('mainBanner');
+        const bannerText = document.getElementById('bannerText');
+        const bannerIcon = document.getElementById('bannerIcon');
+        const safeStatus = document.getElementById('safeStatus');
+        const objCount = document.getElementById('objCount');
+
+        let isCamActive = false;
+        let isMirrored = false;
+        let ws = null;
+        let backendDetections = [];
+        let backendImgSize = { width: 320, height: 240 };
+        let navigationDirection = "STRAIGHT";
+        let simulatedPersonActive = false;
+        let simulatedObstacleActive = false;
+
+        btnToggleCam.addEventListener('click', toggleCamera);
+        btnToggleMirror.addEventListener('click', toggleMirrorMode);
+
+        function toggleMirrorMode() {
+            isMirrored = !isMirrored;
+            if (isMirrored) {
+                video.classList.add('mirrored');
+                canvas.classList.add('mirrored');
+                btnToggleMirror.innerText = "🔄 Đổi Góc Nhìn (Selfie)";
+                addLog("alert-info", "[CAMERA] Đã chuyển sang chế độ Gương Lật.");
+            } else {
+                video.classList.remove('mirrored');
+                canvas.classList.remove('mirrored');
+                btnToggleMirror.innerText = "🔄 Đổi Góc Nhìn POV";
+                addLog("alert-info", "[CAMERA] Đã chuyển sang góc nhìn POV Kính Thông Minh.");
+            }
+        }
+
+        async function toggleCamera() {
+            if (isCamActive) {
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(t => t.stop());
+                }
+                isCamActive = false;
+                btnToggleCam.innerHTML = "<span>📹</span> Bật Camera AI";
+                btnToggleCam.classList.remove('btn-danger');
+                btnToggleCam.classList.add('btn-primary');
+                bannerText.innerText = "Camera đã dừng. Bấm để bật lại.";
+                bannerIcon.innerText = "⏸️";
+                if (ws) ws.close();
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                addLog("alert-warn", "[CAMERA] Đã dừng Camera.");
+            } else {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "environment" }
+                    });
+                    video.srcObject = stream;
+                    isCamActive = true;
+                    btnToggleCam.innerHTML = "<span>⏹️</span> Dừng Camera";
+                    btnToggleCam.classList.remove('btn-primary');
+                    btnToggleCam.classList.add('btn-danger');
+
+                    video.onloadedmetadata = () => {
+                        canvas.width = video.videoWidth || 640;
+                        canvas.height = video.videoHeight || 480;
+                        requestAnimationFrame(renderLoop);
+                        connectWebSocket();
+                    };
+
+                    addLog("alert-info", "[CAMERA] Bật Camera thành công.");
+                    speakBlaze("Hệ thống dẫn đường thông minh đã kích hoạt. Lối đi phía trước thông thoáng.", "FORCE");
+                } catch (err) {
+                    alert("Không thể mở Webcam: " + err.message);
+                }
+            }
+        }
+
+        function connectWebSocket() {
+            try {
+                ws = new WebSocket("ws://localhost:8000/api/v1/vision/stream");
+                ws.onopen = () => {
+                    addLog("alert-info", "[WEBSOCKET] Đã kết nối AI YOLO Backend!");
+                    document.getElementById("pillAi").classList.add("active");
+                };
+                ws.onmessage = (event) => {
+                    try {
+                        const res = JSON.parse(event.data);
+                        if (res.success && res.objects) {
+                            backendDetections = res.objects;
+                            if (res.img_size) {
+                                backendImgSize = res.img_size;
+                            }
+                        }
+                    } catch (e) { }
+                };
+                ws.onclose = () => {
+                    addLog("alert-warn", "[WEBSOCKET] Backend ngắt kết nối.");
+                };
+            } catch (e) { }
+        }
+
+        // Gửi frame sang Backend YOLO qua WebSocket (4 khung hình/giây)
+        setInterval(() => {
+            if (isCamActive && ws && ws.readyState === WebSocket.OPEN && canvas.width > 0) {
+                const offscreen = document.createElement('canvas');
+                offscreen.width = 320;
+                offscreen.height = 240;
+                const oCtx = offscreen.getContext('2d');
+                oCtx.drawImage(video, 0, 0, 320, 240);
+                const dataUrl = offscreen.toDataURL('image/jpeg', 0.5);
+                ws.send(dataUrl);
+            }
+        }, 250);
+
+        // ==========================================
+        // THUẬT TOÁN HÌNH THANG 3D: VÙNG AN TOÀN (ROI)
+        // ==========================================
+        function isBoxInCorridor(b, w, h) {
+            if (!b) return false;
+            // Điểm tiếp đất của vật thể: đáy giữa bounding box
+            const bx = (b.x1 + b.x2) / 2;
+            const by = b.y2;
+
+            const topY = h * 0.45;
+            // 1. Nếu vật thể ở nửa trên màn hình (treo trên tường, quạt trần, giá sách) -> AN TOÀN!
+            if (by < topY) return false;
+
+            const centerX = w * 0.5;
+            const topW = w * 0.35;
+            const botW = w * 0.75;
+
+            // Tiến độ từ đỉnh hình thang (topY) xuống đáy màn hình (h)
+            const progress = Math.min(1, Math.max(0, (by - topY) / (h - topY)));
+            const curHalfWidth = (topW / 2) + progress * ((botW - topW) / 2);
+
+            // Nằm trong hành lang lối đi
+            return Math.abs(bx - centerX) <= curHalfWidth;
+        }
+
+        // ==========================================
+        // VẼ KHUNG HÌNH AR THỜI GIAN THỰC (CANVAS LOOP)
+        // ==========================================
+        let frameCount = 0;
+        let lastFpsTime = performance.now();
+
+        function renderLoop() {
+            if (!isCamActive) return;
+
+            frameCount++;
+            const now = performance.now();
+            if (now - lastFpsTime >= 1000) {
+                document.getElementById('fpsCounter').innerText = `FPS: ${frameCount} • LATENCY: 16ms`;
+                frameCount = 0;
+                lastFpsTime = now;
+            }
+
+            const w = canvas.width;
+            const h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+
+            // 1. VẼ VÙNG QUAN TÂM (ROI) - LỐI ĐI AN TOÀN HÌNH THANG 3D
+            drawSafeCorridor(w, h);
+
+            // 2. PHÂN TÍCH VẬT THỂ
+            let personInCorridor = false;
+            let obstacleInCorridor = false;
+            let obstacleName = "";
+            let inCorridorCount = 0;
+
+            // Tỷ lệ chuyển đổi tọa độ từ Backend (320x240) sang Canvas hiển thị thực tế
+            const scaleX = w / (backendImgSize.width || 320);
+            const scaleY = h / (backendImgSize.height || 240);
+
+            backendDetections.forEach(obj => {
+                const rawB = obj.bounding_box;
+                if (!rawB) return;
+
+                // Scale tọa độ khớp chính xác 100% với canvas
+                const b = {
+                    x1: rawB.x1 * scaleX,
+                    y1: rawB.y1 * scaleY,
+                    x2: rawB.x2 * scaleX,
+                    y2: rawB.y2 * scaleY
+                };
+
+                const rawName = (obj.class_name || "").toLowerCase();
+                const isPerson = rawName === "person" || rawName.includes("người");
+                const vnName = getVietnameseName(rawName);
+
+                // KIỂM TRA: VẬT THỂ CÓ NẰM TRONG HÌNH THANG AN TOÀN KHÔNG?
+                const inRoi = isBoxInCorridor(b, w, h);
+
+                if (inRoi) {
+                    inCorridorCount++;
+                    if (isPerson) {
+                        personInCorridor = true;
+                    } else {
+                        obstacleInCorridor = true;
+                        obstacleName = vnName;
+                    }
+                    // Vẽ Bounding Box ĐẬM khi lọt vào vùng an toàn
+                    drawBoundingBox(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, `${isPerson ? 'NGƯỜI' : vnName.toUpperCase()} (TRONG LỐI ĐI)`, isPerson ? '#ff3366' : '#ffb703', true);
+                } else {
+                    // Vẽ Bounding Box MỜ nếu nằm ngoài lề (an toàn, không gây cảnh báo)
+                    drawBoundingBox(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, `${isPerson ? 'Người' : vnName} (ngoài lề, an toàn)`, 'rgba(140, 156, 184, 0.45)', false);
+                }
+            });
+
+            // Nút Giả lập người (cho buổi thuyết trình)
+            if (simulatedPersonActive) {
+                personInCorridor = true;
+                inCorridorCount++;
+                drawBoundingBox(w * 0.38, h * 0.42, w * 0.24, h * 0.45, "NGƯỜI (GIẢ LẬP) • 1.2m", "#ff3366", true);
+            }
+
+            // Nút Giả lập vật cản (ghế/thùng hàng)
+            if (simulatedObstacleActive) {
+                obstacleInCorridor = true;
+                obstacleName = "vật cản";
+                inCorridorCount++;
+                drawBoundingBox(w * 0.36, h * 0.55, w * 0.28, h * 0.32, "VẬT CẢN (GIẢ LẬP) • 0.8m", "#ffb703", true);
+            }
+
+            // 3. CẬP NHẬT TRẠNG THÁI HUD & GIỌNG NÓI TIẾNG VIỆT CHUẨN XÁC
+            if (personInCorridor) {
+                safeStatus.innerText = "🛑 CẢNH BÁO: CÓ NGƯỜI!";
+                safeStatus.style.color = "var(--neon-red)";
+                mainBanner.className = "hud-bottom-banner hazard-person";
+                bannerIcon.innerText = "🛑";
+                bannerText.innerText = "CẢNH BÁO: Có người đang đứng ở ngay phía trước!";
+                navigationDirection = "HAZARD_PERSON";
+
+                // Giọng nói tiếng Việt khi có người
+                speakBlaze("Cảnh báo, có người ở ngay trước mặt, hãy đi chậm lại hoặc dừng lại!", "HIGH");
+
+            } else if (obstacleInCorridor) {
+                safeStatus.innerText = "⚠️ CẢNH BÁO: CÓ VẬT CẢN!";
+                safeStatus.style.color = "var(--neon-amber)";
+                mainBanner.className = "hud-bottom-banner hazard-obstacle";
+                bannerIcon.innerText = "⚠️";
+                bannerText.innerText = `Cảnh báo: Có ${obstacleName} chắn ở phía trước!`;
+                navigationDirection = "HAZARD_OBSTACLE";
+
+                // Giọng nói tiếng Việt khi có vật cản
+                speakBlaze(`Cảnh báo, có ${obstacleName} ở ngay trước mặt, chú ý bước chân!`, "HIGH");
+
+            } else {
+                safeStatus.innerText = "✅ LỐI ĐI: AN TOÀN";
+                safeStatus.style.color = "var(--neon-green)";
+                mainBanner.className = "hud-bottom-banner";
+                updateNavBannerFromStep();
+            }
+
+            objCount.innerText = `VẬT CẢN TRONG LÀN: ${inCorridorCount}`;
+
+            // 4. VẼ MŨI TÊN CHỈ ĐƯỜNG AR 3D MÔ PHỎNG TRỰC TIẾP TRÊN HÌNH ẢNH CAMERA
+            drawArNavigationArrow(w, h, personInCorridor, obstacleInCorridor);
+
+            requestAnimationFrame(renderLoop);
+        }
+
+        // HÀM VẼ LỐI ĐI AN TOÀN HÌNH THANG 3D
+        function drawSafeCorridor(w, h) {
+            const topY = h * 0.45;
+            const topW = w * 0.35;
+            const botW = w * 0.75;
+            const centerX = w * 0.5;
+
+            const grad = ctx.createLinearGradient(0, topY, 0, h);
+            grad.addColorStop(0, "rgba(0, 240, 255, 0.05)");
+            grad.addColorStop(1, "rgba(0, 255, 136, 0.22)");
+
+            ctx.fillStyle = grad;
+            ctx.strokeStyle = "rgba(0, 240, 255, 0.85)";
+            ctx.lineWidth = 2.5;
+            ctx.setLineDash([12, 6]);
+
+            ctx.beginPath();
+            ctx.moveTo(centerX - topW / 2, topY);
+            ctx.lineTo(centerX + topW / 2, topY);
+            ctx.lineTo(centerX + botW / 2, h);
+            ctx.lineTo(centerX - botW / 2, h);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Vạch xúc giác dẫn đường màu vàng ở chính giữa tim đường
+            ctx.strokeStyle = "rgba(255, 183, 3, 0.75)";
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.moveTo(centerX, topY);
+            ctx.lineTo(centerX, h);
+            ctx.stroke();
+        }
+
+        // ==========================================
+        // VẼ MŨI TÊN CHỈ ĐƯỜNG AR 3D MÔ PHỎNG TRỰC TIẾP TRÊN CAMERA
+        // ==========================================
+        function drawArNavigationArrow(w, h, hasPerson, hasObstacle) {
+            const time = performance.now() * 0.003;
+            const bounce = Math.sin(time) * 10;
+            const centerX = w * 0.5;
+            const arrowBaseY = h * 0.80 + bounce;
+
+            ctx.save();
+
+            if (hasPerson) {
+                // 🛑 BIỂU TƯỢNG BIỂN BÁO STOP ĐỎ RỰC 3D
+                ctx.shadowColor = "#ff3366";
+                ctx.shadowBlur = 30;
+                ctx.fillStyle = "#ff3366";
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 4;
+
+                ctx.beginPath();
+                const sz = 42;
+                ctx.arc(centerX, arrowBaseY - 35, sz, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = "#fff";
+                ctx.font = "bold 24px 'Outfit', sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText("STOP", centerX, arrowBaseY - 26);
+
+            } else if (hasObstacle) {
+                // ⚠️ BIỂU TƯỢNG CẢNH BÁO VẬT CẢN TAM GIÁC VÀNG
+                ctx.shadowColor = "#ffb703";
+                ctx.shadowBlur = 25;
+                ctx.fillStyle = "#ffb703";
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 3.5;
+
+                ctx.beginPath();
+                ctx.moveTo(centerX, arrowBaseY - 75);
+                ctx.lineTo(centerX + 42, arrowBaseY + 5);
+                ctx.lineTo(centerX - 42, arrowBaseY + 5);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = "#000";
+                ctx.font = "bold 28px 'Outfit', sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText("!", centerX, arrowBaseY - 10);
+
+            } else if (navigationDirection === "LEFT") {
+                // ↰ MŨI TÊN AR RẼ TRÁI 3D (CYAN GLOWING NEON)
+                ctx.shadowColor = "#00f0ff";
+                ctx.shadowBlur = 25;
+                ctx.fillStyle = "#00f0ff";
+
+                ctx.beginPath();
+                ctx.moveTo(centerX - 35, arrowBaseY - 70);
+                ctx.lineTo(centerX - 90, arrowBaseY - 35);
+                ctx.lineTo(centerX - 55, arrowBaseY - 35);
+                ctx.lineTo(centerX - 55, arrowBaseY + 10);
+                ctx.lineTo(centerX - 15, arrowBaseY + 10);
+                ctx.lineTo(centerX - 15, arrowBaseY - 35);
+                ctx.lineTo(centerX + 20, arrowBaseY - 35);
+                ctx.closePath();
+                ctx.fill();
+
+                // Vòng sóng quét định hướng rẽ trái
+                ctx.strokeStyle = "rgba(0, 240, 255, 0.75)";
+                ctx.lineWidth = 5;
+                ctx.lineCap = "round";
+                ctx.beginPath();
+                ctx.arc(centerX - 90, arrowBaseY - 35, 30, 0.75 * Math.PI, 1.45 * Math.PI);
+                ctx.stroke();
+
+                // Chữ HUD chỉ dẫn trên sàn
+                ctx.font = "bold 15px 'Outfit', sans-serif";
+                ctx.fillStyle = "#fff";
+                ctx.textAlign = "center";
+                ctx.fillText("RẼ TRÁI SAU 5M", centerX, arrowBaseY + 32);
+
+            } else if (navigationDirection === "RIGHT") {
+                // ↱ MŨI TÊN AR RẼ PHẢI 3D
+                ctx.shadowColor = "#00f0ff";
+                ctx.shadowBlur = 25;
+                ctx.fillStyle = "#00f0ff";
+
+                ctx.beginPath();
+                ctx.moveTo(centerX + 35, arrowBaseY - 70);
+                ctx.lineTo(centerX + 90, arrowBaseY - 35);
+                ctx.lineTo(centerX + 55, arrowBaseY - 35);
+                ctx.lineTo(centerX + 55, arrowBaseY + 10);
+                ctx.lineTo(centerX + 15, arrowBaseY + 10);
+                ctx.lineTo(centerX + 15, arrowBaseY - 35);
+                ctx.lineTo(centerX - 20, arrowBaseY - 35);
+                ctx.closePath();
+                ctx.fill();
+
+                // Vòng sóng quét định hướng rẽ phải
+                ctx.strokeStyle = "rgba(0, 240, 255, 0.75)";
+                ctx.lineWidth = 5;
+                ctx.lineCap = "round";
+                ctx.beginPath();
+                ctx.arc(centerX + 90, arrowBaseY - 35, 30, 1.55 * Math.PI, 0.25 * Math.PI);
+                ctx.stroke();
+
+                // Chữ HUD chỉ dẫn trên sàn
+                ctx.font = "bold 15px 'Outfit', sans-serif";
+                ctx.fillStyle = "#fff";
+                ctx.textAlign = "center";
+                ctx.fillText("RẼ PHẢI - ĐÃ TỚI ĐÍCH", centerX, arrowBaseY + 32);
+
+            } else {
+                // ⬆ MŨI TÊN AR ĐI THẲNG 3D (NEON GREEN CỰC LỚN + CHEVRON SÓNG CHUYỂN ĐỘNG)
+                ctx.shadowColor = "#00ff88";
+                ctx.shadowBlur = 25;
+                ctx.fillStyle = "rgba(0, 255, 136, 0.95)";
+
+                // Mũi tên chính
+                ctx.beginPath();
+                ctx.moveTo(centerX, arrowBaseY - 85);
+                ctx.lineTo(centerX + 42, arrowBaseY - 35);
+                ctx.lineTo(centerX + 18, arrowBaseY - 35);
+                ctx.lineTo(centerX + 18, arrowBaseY + 12);
+                ctx.lineTo(centerX - 18, arrowBaseY + 12);
+                ctx.lineTo(centerX - 18, arrowBaseY - 35);
+                ctx.lineTo(centerX - 42, arrowBaseY - 35);
+                ctx.closePath();
+                ctx.fill();
+
+                // Các vạch Chevron 3D lướt về phía trước tạo chiều sâu không gian
+                const waveOffset = (performance.now() * 0.05) % 45;
+                ctx.strokeStyle = "rgba(0, 255, 136, 0.75)";
+                ctx.lineWidth = 5;
+                ctx.lineCap = "round";
+
+                [25, 55, 85].forEach(d => {
+                    const yPos = arrowBaseY - 85 - d + waveOffset;
+                    if (yPos > h * 0.48) {
+                        ctx.beginPath();
+                        ctx.moveTo(centerX - 30, yPos + 15);
+                        ctx.lineTo(centerX, yPos);
+                        ctx.lineTo(centerX + 30, yPos + 15);
+                        ctx.stroke();
+                    }
+                });
+
+                // Chữ HUD chỉ dẫn trên sàn
+                ctx.font = "bold 15px 'Outfit', sans-serif";
+                ctx.fillStyle = "#fff";
+                ctx.textAlign = "center";
+                ctx.fillText("TIẾP TỤC ĐI THẲNG", centerX, arrowBaseY + 34);
+            }
+
+            ctx.restore();
+        }
+
+        // HÀM VẼ BOUNDING BOX
+        function drawBoundingBox(x, y, bw, bh, label, color, isHighlight) {
+            ctx.save();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = isHighlight ? 3.5 : 1.5;
+            if (isHighlight) {
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 15;
+            }
+
+            ctx.strokeRect(x, y, bw, bh);
+
+            ctx.fillStyle = isHighlight ? color : "rgba(11, 15, 25, 0.75)";
+            ctx.fillRect(x, y - 26, Math.max(bw, 140), 26);
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 13px 'JetBrains Mono', monospace";
+            ctx.fillText(label, x + 6, y - 8);
+
+            ctx.restore();
+        }
+
+        // ==========================================
+        // CÁC NÚT ĐIỀU KHIỂN & MÔ PHỎNG THUYẾT TRÌNH
+        // ==========================================
+        function updateNavBannerFromStep() {
+            const step = simulatedRoute[currentStepIdx];
+            bannerIcon.innerText = step.icon;
+            bannerText.innerText = `${step.step} • ${step.sub}`;
+            navigationDirection = step.dir;
+        }
+
+        // 1. NÚT ĐỔI HƯỚNG MŨI TÊN GPS
+        document.getElementById('btnNextStep').addEventListener('click', () => {
+            currentStepIdx = (currentStepIdx + 1) % simulatedRoute.length;
+            const step = simulatedRoute[currentStepIdx];
+
+            userMarker.setLatLng([step.lat, step.lng]);
+            map.panTo([step.lat, step.lng]);
+
+            document.getElementById('distRemain').innerText = step.dist;
+            document.getElementById('stepIcon').innerText = step.icon;
+            document.getElementById('stepTitle').innerText = step.step;
+            document.getElementById('stepSub').innerText = step.sub;
+
+            updateNavBannerFromStep();
+            addLog("alert-info", `[GPS] Tiến bước: "${step.step}"`);
+            speakBlaze(step.voice || step.step, "FORCE");
+        });
+
+        // 2. NÚT THỬ GIỌNG ĐỌC BLAZE TIẾNG VIỆT
+        document.getElementById('btnTestVoice').addEventListener('click', () => {
+            speakBlaze("Xin chào! Tôi là trợ lý thị giác thông minh. Lối đi phía trước an toàn, hãy tiếp tục đi thẳng.", "FORCE");
+        });
+
+        // 3. NÚT GIẢ LẬP CÓ NGƯỜI PHÍA TRƯỚC
+        document.getElementById('btnSimulatePerson').addEventListener('click', () => {
+            simulatedPersonActive = !simulatedPersonActive;
+            const btn = document.getElementById('btnSimulatePerson');
+
+            if (simulatedPersonActive) {
+                btn.style.borderColor = "var(--neon-red)";
+                btn.style.color = "var(--neon-red)";
+                btn.innerHTML = "<span>❌</span> Hủy Giả Lập Người";
+                addLog("alert-danger", "[CẢNH BÁO] Có người xuất hiện ở ngay trước mặt!");
+                speakBlaze("Cảnh báo, có người ở ngay trước mặt, hãy đi chậm lại hoặc dừng lại!", "FORCE");
+            } else {
+                btn.style.borderColor = "rgba(255, 255, 255, 0.15)";
+                btn.style.color = "var(--text-main)";
+                btn.innerHTML = "<span>👤</span> Giả Lập Có Người";
+                addLog("alert-info", "[AN TOÀN] Vùng quan tâm đã thông thoáng.");
+            }
+        });
+
+        // 4. NÚT GIẢ LẬP CÓ VẬT CẢN PHÍA TRƯỚC
+        document.getElementById('btnSimulateObstacle').addEventListener('click', () => {
+            simulatedObstacleActive = !simulatedObstacleActive;
+            const btn = document.getElementById('btnSimulateObstacle');
+
+            if (simulatedObstacleActive) {
+                btn.style.borderColor = "var(--neon-amber)";
+                btn.style.color = "var(--neon-amber)";
+                btn.innerHTML = "<span>❌</span> Hủy Giả Lập Vật Cản";
+                addLog("alert-warn", "[CẢNH BÁO] Có vật cản xuất hiện ở ngay trước mặt!");
+                speakBlaze("Cảnh báo, có vật cản ở ngay trước mặt, chú ý bước chân!", "FORCE");
+            } else {
+                btn.style.borderColor = "rgba(255, 255, 255, 0.15)";
+                btn.style.color = "var(--text-main)";
+                btn.innerHTML = "<span>📦</span> Giả Lập Có Vật Cản";
+                addLog("alert-info", "[AN TOÀN] Vùng quan tâm đã thông thoáng.");
+            }
+        });
+
+    </script>
+</body>
+</html>
