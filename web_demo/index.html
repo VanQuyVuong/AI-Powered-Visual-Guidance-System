@@ -100,18 +100,24 @@
             display: flex;
             align-items: center;
             gap: 6px;
-            padding: 6px 14px;
+            padding: 6px 12px;
             border-radius: 20px;
-            font-size: 0.78rem;
+            font-size: 0.75rem;
             font-family: 'JetBrains Mono', monospace;
-            background: rgba(255, 255, 255, 0.04);
+            background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
             color: var(--text-muted);
         }
 
         .pill.active {
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+            background: rgba(0, 255, 136, 0.1);
+        }
+
+        .pill.active-cyan {
             border-color: var(--neon-cyan);
-            color: #fff;
+            color: var(--neon-cyan);
             background: rgba(0, 240, 255, 0.1);
         }
 
@@ -119,24 +125,24 @@
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background-color: var(--neon-green);
+            background: var(--neon-green);
             box-shadow: 0 0 8px var(--neon-green);
-            animation: pulseDot 1.5s infinite;
+            animation: pulse 1.5s infinite;
         }
 
-        @keyframes pulseDot {
+        @keyframes pulse {
             0% { transform: scale(0.9); opacity: 0.7; }
-            50% { transform: scale(1.3); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 1; }
             100% { transform: scale(0.9); opacity: 0.7; }
         }
 
-        /* DASHBOARD LAYOUT */
+        /* MAIN DASHBOARD LAYOUT */
         .dashboard-container {
             display: grid;
-            grid-template-columns: 1.45fr 1fr;
+            grid-template-columns: 1.7fr 1.3fr;
             gap: 20px;
             padding: 20px 28px;
-            max-width: 1600px;
+            max-width: 1680px;
             margin: 0 auto;
         }
 
@@ -146,6 +152,7 @@
             }
         }
 
+        /* GLASS CARD COMMON */
         .glass-panel {
             background: var(--bg-card);
             backdrop-filter: blur(16px);
@@ -215,6 +222,32 @@
         .hud-top-left { top: 14px; left: 14px; color: var(--neon-cyan); }
         .hud-top-right { top: 14px; right: 14px; }
 
+        .hud-top-center {
+            top: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: var(--neon-cyan);
+            border-color: rgba(0, 240, 255, 0.35);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+            font-weight: 600;
+            transition: all 0.25s ease;
+            white-space: nowrap;
+        }
+
+        .hud-top-center.pulse-step {
+            color: var(--neon-green);
+            border-color: var(--neon-green);
+            box-shadow: 0 0 25px rgba(0, 255, 136, 0.6);
+            transform: translateX(-50%) scale(1.05);
+        }
+
+        .hud-top-center.pulse-turn {
+            color: #fff;
+            border-color: var(--neon-cyan);
+            box-shadow: 0 0 25px rgba(0, 240, 255, 0.7);
+            transform: translateX(-50%) scale(1.05);
+        }
+
         .hud-bottom-banner {
             position: absolute;
             bottom: 16px;
@@ -261,6 +294,130 @@
             100% { transform: translateX(-50%) scale(1.01); }
         }
 
+        /* MOTION TRACKING HUD PANEL */
+        .motion-hud-panel {
+            background: rgba(18, 26, 43, 0.9);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            border-radius: 12px;
+            padding: 12px 16px;
+            backdrop-filter: blur(12px);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .motion-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            font-weight: 700;
+        }
+
+        .motion-title {
+            color: var(--neon-cyan);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .motion-sensitivity {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .motion-sensitivity select {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            color: var(--text-main);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            outline: none;
+        }
+
+        .motion-cards-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+
+        .motion-card-item {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.25s ease;
+        }
+
+        .motion-card-item .m-icon {
+            font-size: 1.4rem;
+        }
+
+        .motion-card-item .m-info {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            z-index: 2;
+        }
+
+        .motion-card-item .m-info strong {
+            font-size: 0.78rem;
+            color: #fff;
+        }
+
+        .motion-card-item .m-info span {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .motion-card-item .m-meter-track {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .motion-card-item .m-meter-bar {
+            width: 0%;
+            height: 100%;
+            background: var(--neon-cyan);
+            transition: width 0.1s ease;
+        }
+
+        .motion-card-item.active-step {
+            background: rgba(0, 255, 136, 0.18);
+            border-color: var(--neon-green);
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
+            transform: translateY(-2px);
+        }
+        .motion-card-item.active-step .m-meter-bar {
+            background: var(--neon-green);
+            width: 100% !important;
+        }
+
+        .motion-card-item.active-turn {
+            background: rgba(0, 240, 255, 0.2);
+            border-color: var(--neon-cyan);
+            box-shadow: 0 0 18px rgba(0, 240, 255, 0.5);
+            transform: translateY(-2px);
+        }
+        .motion-card-item.active-turn .m-meter-bar {
+            background: var(--neon-cyan);
+            width: 100% !important;
+        }
+
         /* CONTROLS ROW */
         .controls-row {
             display: grid;
@@ -291,6 +448,22 @@
         .btn-primary:hover {
             box-shadow: 0 0 15px rgba(0, 240, 255, 0.5);
             transform: translateY(-2px);
+        }
+
+        .btn-action {
+            background: linear-gradient(135deg, rgba(0, 240, 255, 0.18), rgba(138, 43, 226, 0.25));
+            border-color: rgba(0, 240, 255, 0.45);
+            color: var(--neon-cyan);
+        }
+        .btn-action:hover {
+            background: linear-gradient(135deg, rgba(0, 240, 255, 0.35), rgba(138, 43, 226, 0.45));
+            border-color: var(--neon-cyan);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
+            color: #fff;
+            transform: translateY(-2px);
+        }
+        .btn-action:active {
+            transform: scale(0.96);
         }
 
         .btn-secondary {
@@ -456,6 +629,9 @@
                 <div class="dot-pulse"></div>
                 <span>YOLOv8 + Cự Ly &lt;1.8m</span>
             </div>
+            <div class="pill active-cyan" id="pillMotion">
+                <span>🧭 Cử Động Cam: BẬT</span>
+            </div>
             <div class="pill active" id="pillVoice">
                 <span>🎙️ Blaze TTS (Tiếng Việt Chuẩn)</span>
             </div>
@@ -480,6 +656,10 @@
                     <div id="fpsCounter">FPS: 30 • LATENCY: 16ms</div>
                 </div>
 
+                <div class="hud-corner hud-top-center" id="hudMotionBadge">
+                    🧭 ĐANG CHỜ CỬ ĐỘNG CAMERA...
+                </div>
+
                 <div class="hud-corner hud-top-right">
                     <div id="safeStatus" style="color: var(--neon-green); font-weight: 600;">LỐI ĐI: AN TOÀN</div>
                     <div id="objCount" style="color: var(--text-muted);">VẬT CẢN TRONG LÀN: 0</div>
@@ -492,25 +672,80 @@
                 </div>
             </div>
 
+            <!-- BẢNG ĐIỀU KHIỂN & CHỈ BÁO CỬ ĐỘNG CAMERA (OPTICAL FLOW) -->
+            <div class="motion-hud-panel">
+                <div class="motion-panel-header">
+                    <div class="motion-title">
+                        <span>🧭 NHẬN DIỆN CỬ ĐỘNG CAMERA & BƯỚC ĐI (OPTICAL FLOW + GYRO)</span>
+                    </div>
+                    <div class="motion-sensitivity">
+                        <label>Độ nhạy: </label>
+                        <select id="selSensitivity">
+                            <option value="high">Cao (Cử động nhẹ)</option>
+                            <option value="medium" selected>Chuẩn (Khuyên dùng)</option>
+                            <option value="low">Thấp</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="motion-cards-grid">
+                    <div class="motion-card-item" id="boxMotionStep">
+                        <span class="m-icon">🏃</span>
+                        <div class="m-info">
+                            <strong>LẮC DỌC / ĐI TỚI</strong>
+                            <span id="txtStepStatus">Còn 25m</span>
+                        </div>
+                        <div class="m-meter-track"><div class="m-meter-bar" id="meterStep"></div></div>
+                    </div>
+                    <div class="motion-card-item" id="boxMotionLeft">
+                        <span class="m-icon">↰</span>
+                        <div class="m-info">
+                            <strong>QUAY TRÁI</strong>
+                            <span>Góc rẽ 90°</span>
+                        </div>
+                        <div class="m-meter-track"><div class="m-meter-bar" id="meterLeft"></div></div>
+                    </div>
+                    <div class="motion-card-item" id="boxMotionRight">
+                        <span class="m-icon">↱</span>
+                        <div class="m-info">
+                            <strong>QUAY PHẢI</strong>
+                            <span>Góc rẽ 90°</span>
+                        </div>
+                        <div class="m-meter-track"><div class="m-meter-bar" id="meterRight"></div></div>
+                    </div>
+                </div>
+            </div>
+
             <!-- THANH ĐIỀU KHIỂN DƯỚI CAMERA -->
             <div class="controls-row">
                 <button class="btn-hud btn-primary" id="btnToggleCam">
                     <span>📹</span> Bật Camera AI
                 </button>
+                <button class="btn-hud btn-action" id="btnActionStep" title="Phím tắt: W hoặc Mũi tên Lên">
+                    <span>🏃</span> Bước Đi (-5m) [W]
+                </button>
+                <button class="btn-hud btn-action" id="btnActionTurnLeft" title="Phím tắt: A hoặc Mũi tên Trái">
+                    <span>↰</span> Quay Trái [A]
+                </button>
+                <button class="btn-hud btn-action" id="btnActionTurnRight" title="Phím tắt: D hoặc Mũi tên Phải">
+                    <span>↱</span> Quay Phải [D]
+                </button>
+                <button class="btn-hud btn-secondary" id="btnResetRoute">
+                    <span>🔄</span> Đặt Lại Lộ Trình
+                </button>
                 <button class="btn-hud btn-secondary" id="btnNextStep">
-                    <span>🚶</span> Đổi Hướng Mũi Tên GPS
+                    <span>🚶</span> Đổi Hướng GPS
                 </button>
                 <button class="btn-hud btn-secondary" id="btnTestVoice">
-                    <span>🔊</span> Thử Giọng Blaze Tiếng Việt
+                    <span>🔊</span> Thử Giọng Blaze
                 </button>
                 <button class="btn-hud btn-secondary" id="btnSimulatePerson">
-                    <span>👤</span> Giả Lập Có Người (1.2m)
+                    <span>👤</span> Giả Lập Người (1.2m)
                 </button>
                 <button class="btn-hud btn-secondary" id="btnSimulateObstacle">
                     <span>📦</span> Giả Lập Vật Cản (0.8m)
                 </button>
                 <button class="btn-hud btn-secondary" id="btnToggleMirror">
-                    <span>🔄</span> Đổi Góc Nhìn POV
+                    <span>🔄</span> Đổi Góc POV
                 </button>
             </div>
         </section>
@@ -529,13 +764,13 @@
 
                 <div class="route-info-box">
                     <div>Lộ trình: <b>Trạm Xe Buýt Bến Thành</b></div>
-                    <div>Còn lại: <b id="distRemain" style="color: var(--neon-cyan);">85 m</b></div>
+                    <div>Còn lại: <b id="distRemain" style="color: var(--neon-cyan);">70 m</b></div>
                 </div>
 
                 <div class="nav-step-highlight">
                     <div class="nav-icon" id="stepIcon">⬆️</div>
                     <div class="nav-text">
-                        <strong id="stepTitle">Đi thẳng 25 mét</strong>
+                        <strong id="stepTitle">Chặng 1: Đi thẳng 25 mét</strong>
                         <small id="stepSub">Giữ đúng vạch xúc giác màu vàng trên camera</small>
                     </div>
                 </div>
@@ -573,7 +808,7 @@
 
                 <div class="logs-scroll" id="logsContainer">
                     <div class="log-item alert-info">
-                        <span>[HỆ THỐNG]</span> Khởi tạo thành công mô đun Vision & GPS Simulator.
+                        <span>[HỆ THỐNG]</span> Khởi tạo thành công Vision, GPS Simulator & Camera Motion Engine.
                     </div>
                 </div>
             </div>
@@ -627,10 +862,10 @@
 
         async function speakBlaze(text, priority = "MEDIUM") {
             const now = Date.now();
-            if (now - lastSpeakTime < 4000 && text === lastSpokenText && priority !== "FORCE") {
+            if (now - lastSpeakTime < 3000 && text === lastSpokenText && priority !== "FORCE") {
                 return;
             }
-            if (now - lastSpeakTime < 2500 && priority !== "FORCE") {
+            if (now - lastSpeakTime < 1800 && priority !== "FORCE") {
                 return;
             }
             lastSpeakTime = now;
@@ -682,9 +917,84 @@
         }
 
         // ==========================================
+        // CẤU HÌNH LỘ TRÌNH ĐI BỘ THÔNG MINH
+        // ==========================================
+        const initialCoords = [10.77250, 106.69800];
+        const simulatedRoute = [
+            {
+                id: 0,
+                type: "STRAIGHT",
+                title: "Chặng 1: Đi thẳng 25 mét",
+                sub: "Giữ đúng vạch xúc giác màu vàng trên camera",
+                dir: "STRAIGHT",
+                icon: "⬆️",
+                startCoord: [10.77250, 106.69800],
+                endCoord: [10.77270, 106.69800],
+                totalDist: 25,
+                currentDist: 25,
+                voiceStart: "Đi thẳng hai mươi lăm mét, lối đi an toàn."
+            },
+            {
+                id: 1,
+                type: "TURN_LEFT",
+                title: "Chặng 2: Hãy rẽ trái theo chỉ dẫn",
+                sub: "Quay camera hoặc xoay người sang trái để rẽ",
+                dir: "LEFT",
+                icon: "↰",
+                startCoord: [10.77270, 106.69800],
+                endCoord: [10.77270, 106.69800],
+                totalDist: 0,
+                currentDist: 0,
+                voicePrompt: "Chuẩn bị rẽ trái sau năm mét. Hãy chú ý quay camera sang trái.",
+                voiceDone: "Đã nhận diện rẽ trái thành công! Tiếp tục đi thẳng ba mươi mét."
+            },
+            {
+                id: 2,
+                type: "STRAIGHT",
+                title: "Chặng 3: Đi thẳng 30 mét",
+                sub: "Mặt đường bằng phẳng, không có bậc thang",
+                dir: "STRAIGHT",
+                icon: "⬆️",
+                startCoord: [10.77270, 106.69800],
+                endCoord: [10.77270, 106.69760],
+                totalDist: 30,
+                currentDist: 30,
+                voiceStart: "Đi thẳng ba mươi mét dọc hành lang đi bộ."
+            },
+            {
+                id: 3,
+                type: "TURN_RIGHT",
+                title: "Chặng 4: Rẽ phải vào Trạm Xe Buýt",
+                sub: "Quay camera hoặc xoay người sang phải để vào trạm",
+                dir: "RIGHT",
+                icon: "↱",
+                startCoord: [10.77270, 106.69760],
+                endCoord: [10.77290, 106.69760],
+                totalDist: 15,
+                currentDist: 15,
+                voicePrompt: "Chuẩn bị rẽ phải để vào trạm xe buýt. Hãy chú ý quay camera sang phải.",
+                voiceDone: "Đã rẽ phải. Chúc mừng bạn đã đến điểm đích Trạm Xe Buýt Bến Thành. Lộ trình dẫn đường hoàn tất!"
+            },
+            {
+                id: 4,
+                type: "ARRIVED",
+                title: "ĐÃ ĐẾN NƠI: TRẠM XE BUÝT BẾN THÀNH",
+                sub: "Điểm đến ở ngay bên phải bạn. Lộ trình hoàn tất!",
+                dir: "ARRIVED",
+                icon: "🏁",
+                startCoord: [10.77290, 106.69760],
+                endCoord: [10.77290, 106.69760],
+                totalDist: 0,
+                currentDist: 0,
+                voiceStart: "Bạn đã tới đích an toàn."
+            }
+        ];
+
+        let currentStepIdx = 0;
+
+        // ==========================================
         // KHỞI TẠO BẢN ĐỒ GPS MÔ PHỎNG (LEAFLET)
         // ==========================================
-        const initialCoords = [10.7725, 106.6980];
         const map = L.map('gpsMap', { zoomControl: false }).setView(initialCoords, 18);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -692,18 +1002,15 @@
             attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
-        // Tuyến đường mô phỏng (4 chặng đi bộ)
-        const simulatedRoute = [
-            { lat: 10.7725, lng: 106.6980, step: "Đi thẳng 25 mét", sub: "Lối đi phía trước thông thoáng", dir: "STRAIGHT", icon: "⬆️", dist: "85 m", voice: "Đi thẳng hai mươi lăm mét, lối đi an toàn." },
-            { lat: 10.7727, lng: 106.6980, step: "Chuẩn bị rẽ trái sau 5 mét", sub: "Rẽ trái theo vạch xúc giác", dir: "LEFT", icon: "↰", dist: "60 m", voice: "Chuẩn bị rẽ trái sau năm mét." },
-            { lat: 10.7727, lng: 106.6976, step: "Đi thẳng 30 mét", sub: "Mặt đường bằng phẳng, không có bậc thang", dir: "STRAIGHT", icon: "⬆️", dist: "30 m", voice: "Đi thẳng ba mươi mét, tiếp tục giữ đúng vạch dẫn đường." },
-            { lat: 10.7729, lng: 106.6976, step: "Rẽ phải - Đã tới trạm xe buýt", sub: "Trạm Xe Buýt Bến Thành ở ngay bên phải", dir: "RIGHT", icon: "↱", dist: "5 m", voice: "Rẽ phải, bạn đã tới trạm xe buýt Bến Thành." }
+        // Đường dẫn polyline toàn tuyến
+        const routeCoords = [
+            [10.77250, 106.69800],
+            [10.77270, 106.69800],
+            [10.77270, 106.69760],
+            [10.77290, 106.69760]
         ];
 
-        let currentStepIdx = 0;
-
-        const latlngs = simulatedRoute.map(p => [p.lat, p.lng]);
-        L.polyline(latlngs, {
+        L.polyline(routeCoords, {
             color: '#00f0ff',
             weight: 5,
             opacity: 0.85,
@@ -712,20 +1019,20 @@
 
         const userIcon = L.divIcon({
             className: 'custom-user-marker',
-            html: '<div style="width:16px;height:16px;background:#00ff88;border-radius:50%;box-shadow:0 0 15px #00ff88;border:2px solid #fff;"></div>',
-            iconSize: [16, 16],
-            iconAnchor: [8, 8]
+            html: '<div style="width:18px;height:18px;background:#00ff88;border-radius:50%;box-shadow:0 0 16px #00ff88;border:2px solid #fff;"></div>',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
         });
 
         const userMarker = L.marker(initialCoords, { icon: userIcon }).addTo(map);
 
         const destIcon = L.divIcon({
             className: 'custom-dest-marker',
-            html: '<div style="font-size:22px;">📍</div>',
-            iconSize: [22, 22],
-            iconAnchor: [11, 22]
+            html: '<div style="font-size:24px;">📍</div>',
+            iconSize: [24, 24],
+            iconAnchor: [12, 24]
         });
-        L.marker([10.7729, 106.6976], { icon: destIcon }).addTo(map);
+        L.marker([10.77290, 106.69760], { icon: destIcon }).addTo(map);
 
         function addLog(typeClass, message) {
             const container = document.getElementById("logsContainer");
@@ -751,13 +1058,13 @@
         const bannerIcon = document.getElementById('bannerIcon');
         const safeStatus = document.getElementById('safeStatus');
         const objCount = document.getElementById('objCount');
+        const hudMotionBadge = document.getElementById('hudMotionBadge');
 
         let isCamActive = false;
         let isMirrored = false;
         let ws = null;
         let backendDetections = [];
         let backendImgSize = { width: 320, height: 240 };
-        let navigationDirection = "STRAIGHT";
         let simulatedPersonActive = false;
         let simulatedObstacleActive = false;
 
@@ -865,7 +1172,7 @@
             const by = b.y2;
 
             const topY = h * 0.45;
-            // 1. Nếu vật thể ở nửa trên màn hình (treo trên tường, trần nhà, đèn) -> AN TOÀN!
+            // Nếu vật thể ở nửa trên màn hình (trên tường, trần nhà, đèn) -> AN TOÀN!
             if (by < topY) return false;
 
             const centerX = w * 0.5;
@@ -881,16 +1188,285 @@
         }
 
         // ==========================================
+        // MODULE NHẬN DIỆN CỬ ĐỘNG CAMERA & BƯỚC ĐI
+        // (OPTICAL FLOW + DEVICE SENSORS + SHORTCUTS)
+        // ==========================================
+        const motionCanvas = document.createElement('canvas');
+        motionCanvas.width = 48;
+        motionCanvas.height = 36;
+        const motionCtx = motionCanvas.getContext('2d', { willReadFrequently: true });
+
+        let prevLuma = null;
+        let lastMotionProcessTime = 0;
+        let dxHistory = [];
+        let dyHistory = [];
+        let lastStepTriggerTime = 0;
+        let lastTurnTriggerTime = 0;
+
+        function processCameraMotion() {
+            if (!isCamActive || !video.videoWidth) return;
+
+            const now = performance.now();
+            if (now - lastMotionProcessTime < 45) return; // ~22 fps phân tích
+            lastMotionProcessTime = now;
+
+            motionCtx.drawImage(video, 0, 0, 48, 36);
+            const imgData = motionCtx.getImageData(0, 0, 48, 36).data;
+            const curLuma = new Uint8Array(48 * 36);
+
+            for (let i = 0, j = 0; i < imgData.length; i += 4, j++) {
+                curLuma[j] = (imgData[i] * 77 + imgData[i + 1] * 150 + imgData[i + 2] * 29) >> 8;
+            }
+
+            if (!prevLuma) {
+                prevLuma = curLuma;
+                return;
+            }
+
+            // Block Matching SAD trên vùng trung tâm
+            let bestSad = 999999;
+            let bestDx = 0;
+            let bestDy = 0;
+
+            for (let dy = -3; dy <= 3; dy++) {
+                for (let dx = -4; dx <= 4; dx++) {
+                    let sad = 0;
+                    let count = 0;
+                    for (let y = 6; y < 30; y += 2) {
+                        const row1 = y * 48;
+                        const row2 = (y + dy) * 48;
+                        for (let x = 8; x < 40; x += 2) {
+                            sad += Math.abs(prevLuma[row1 + x] - curLuma[row2 + x + dx]);
+                            count++;
+                        }
+                    }
+                    const avg = sad / count;
+                    if (avg < bestSad) {
+                        bestSad = avg;
+                        bestDx = dx;
+                        bestDy = dy;
+                    }
+                }
+            }
+
+            prevLuma = curLuma;
+
+            dxHistory.push(bestDx);
+            dyHistory.push(bestDy);
+            if (dxHistory.length > 5) dxHistory.shift();
+            if (dyHistory.length > 5) dyHistory.shift();
+
+            const sumDx = dxHistory.reduce((a, b) => a + b, 0);
+            const sumDy = dyHistory.reduce((a, b) => a + b, 0);
+
+            // Cập nhật meter bar trực quan
+            updateMotionMeters(bestDx, bestDy, sumDx, sumDy);
+
+            // Ngưỡng theo độ nhạy người dùng chọn
+            const sens = document.getElementById('selSensitivity')?.value || "medium";
+            const turnThreshold = sens === "high" ? 2.5 : (sens === "medium" ? 4.0 : 6.0);
+            const stepThreshold = sens === "high" ? 2.2 : (sens === "medium" ? 3.2 : 4.8);
+
+            // 1. NHẬN DIỆN QUAY CAMERA (LIA NGANG):
+            // Camera quay PHẢI -> Pixel ảnh trôi sang TRÁI -> sumDx <= -turnThreshold
+            // Camera quay TRÁI -> Pixel ảnh trôi sang PHẢI -> sumDx >= turnThreshold
+            if (Math.abs(sumDx) > Math.abs(sumDy) * 1.2) {
+                if (sumDx <= -turnThreshold) {
+                    triggerCameraTurn("RIGHT", "optical_flow");
+                    dxHistory = [];
+                    return;
+                } else if (sumDx >= turnThreshold) {
+                    triggerCameraTurn("LEFT", "optical_flow");
+                    dxHistory = [];
+                    return;
+                }
+            }
+
+            // 2. NHẬN DIỆN LẮC DỌC / ĐI TỚI (VERTICAL BOBBING)
+            // Khi bước đi hoặc lắc camera lên xuống:
+            const dyPeakToPeak = Math.max(...dyHistory) - Math.min(...dyHistory);
+            if (dyPeakToPeak >= stepThreshold && Math.abs(sumDx) < Math.abs(sumDy) * 2.0) {
+                triggerCameraStep("optical_flow");
+                dyHistory = [];
+            }
+        }
+
+        function updateMotionMeters(dx, dy, sumDx, sumDy) {
+            const meterStep = document.getElementById('meterStep');
+            const meterLeft = document.getElementById('meterLeft');
+            const meterRight = document.getElementById('meterRight');
+
+            // Tính năng lượng chuyển động (%)
+            const stepEnergy = Math.min(100, Math.abs(dy) * 30 + Math.abs(sumDy) * 10);
+            const leftEnergy = sumDx > 0 ? Math.min(100, sumDx * 22) : 0;
+            const rightEnergy = sumDx < 0 ? Math.min(100, Math.abs(sumDx) * 22) : 0;
+
+            if (meterStep) meterStep.style.width = `${stepEnergy}%`;
+            if (meterLeft) meterLeft.style.width = `${leftEnergy}%`;
+            if (meterRight) meterRight.style.width = `${rightEnergy}%`;
+        }
+
+        function showMotionBadge(text, type = "step") {
+            if (!hudMotionBadge) return;
+            hudMotionBadge.innerText = text;
+            hudMotionBadge.className = `hud-corner hud-top-center ${type === 'step' ? 'pulse-step' : 'pulse-turn'}`;
+
+            clearTimeout(hudMotionBadge._timeout);
+            hudMotionBadge._timeout = setTimeout(() => {
+                hudMotionBadge.innerText = "🧭 ĐANG CHỜ CỬ ĐỘNG CAMERA...";
+                hudMotionBadge.className = "hud-corner hud-top-center";
+            }, 1800);
+        }
+
+        // HÀM KÍCH HOẠT BƯỚC ĐI TỚI (LẮC DỌC CAMERA)
+        function triggerCameraStep(source = "manual") {
+            const now = performance.now();
+            if (now - lastStepTriggerTime < 700) return; // Cooldown 700ms
+            lastStepTriggerTime = now;
+
+            const curLeg = simulatedRoute[currentStepIdx];
+
+            // Hiệu ứng box HUD
+            const boxStep = document.getElementById('boxMotionStep');
+            if (boxStep) {
+                boxStep.classList.add('active-step');
+                setTimeout(() => boxStep.classList.remove('active-step'), 600);
+            }
+
+            if (curLeg.type !== "STRAIGHT") {
+                showMotionBadge(`⚠️ HÃY RẼ ${curLeg.dir === 'LEFT' ? 'TRÁI' : 'PHẢI'} TRƯỚC!`, "turn");
+                return;
+            }
+
+            // Giảm khoảng cách chặng đi thẳng (-5m)
+            curLeg.currentDist = Math.max(0, curLeg.currentDist - 5);
+            showMotionBadge(`🏃 BƯỚC ĐI TỚI (-5m) • CÒN ${curLeg.currentDist}m`, "step");
+            addLog("alert-info", `[CỬ ĐỘNG CAMERA] Đi tới: còn ${curLeg.currentDist}m`);
+
+            updateNavigationState();
+
+            if (curLeg.currentDist === 15) {
+                speakBlaze("Còn mười lăm mét.", "MEDIUM");
+            } else if (curLeg.currentDist === 5) {
+                const nextStep = simulatedRoute[currentStepIdx + 1];
+                if (nextStep && nextStep.voicePrompt) {
+                    speakBlaze(nextStep.voicePrompt, "HIGH");
+                }
+            } else if (curLeg.currentDist === 0) {
+                // Đã đến góc ngã rẽ -> Tự động chuyển sang chặng rẽ
+                advanceToNextLeg();
+            }
+        }
+
+        // HÀM KÍCH HOẠT RẼ HƯỚNG (QUAY TRÁI / PHẢI)
+        function triggerCameraTurn(direction, source = "manual") {
+            const now = performance.now();
+            if (now - lastTurnTriggerTime < 1400) return; // Cooldown 1.4s
+            lastTurnTriggerTime = now;
+
+            const box = document.getElementById(direction === "LEFT" ? 'boxMotionLeft' : 'boxMotionRight');
+            if (box) {
+                box.classList.add('active-turn');
+                setTimeout(() => box.classList.remove('active-turn'), 800);
+            }
+
+            const curLeg = simulatedRoute[currentStepIdx];
+
+            if (curLeg.type === "TURN_LEFT" && direction === "LEFT") {
+                showMotionBadge("↰ ĐÃ NHẬN DIỆN RẼ TRÁI THÀNH CÔNG!", "turn");
+                addLog("alert-info", "[CỬ ĐỘNG CAMERA] Đã quay sang trái 90°!");
+                speakBlaze(curLeg.voiceDone, "FORCE");
+                advanceToNextLeg();
+            } else if (curLeg.type === "TURN_RIGHT" && direction === "RIGHT") {
+                showMotionBadge("↱ ĐÃ NHẬN DIỆN RẼ PHẢI THÀNH CÔNG!", "turn");
+                addLog("alert-info", "[CỬ ĐỘNG CAMERA] Đã quay sang phải 90°!");
+                speakBlaze(curLeg.voiceDone, "FORCE");
+                advanceToNextLeg();
+            } else if (curLeg.type === "STRAIGHT") {
+                showMotionBadge(`🧭 Nhận dạng quay ${direction === 'LEFT' ? 'trái' : 'phải'} (Đang ở chặng đi thẳng)`, "step");
+            } else {
+                showMotionBadge(`⚠️ Hướng rẽ yêu cầu là: ${curLeg.type === 'TURN_LEFT' ? 'TRÁI' : 'PHẢI'}`, "turn");
+            }
+        }
+
+        // CHUYỂN TIẾP CHẶNG TIẾP THEO
+        function advanceToNextLeg() {
+            if (currentStepIdx < simulatedRoute.length - 1) {
+                currentStepIdx++;
+                const newLeg = simulatedRoute[currentStepIdx];
+                updateNavigationState();
+                if (newLeg.voiceStart) {
+                    speakBlaze(newLeg.voiceStart, "FORCE");
+                }
+            }
+        }
+
+        // TÍNH TOÁN & CẬP NHẬT TRẠNG THÁI DẪN ĐƯỜNG & MAP GPS
+        function updateNavigationState() {
+            const leg = simulatedRoute[currentStepIdx];
+
+            // 1. Cập nhật vị trí GPS Marker trên bản đồ (Nội suy mượt)
+            let curLat = leg.startCoord[0];
+            let curLng = leg.startCoord[1];
+
+            if (leg.type === "STRAIGHT" && leg.totalDist > 0) {
+                const ratio = 1 - (leg.currentDist / leg.totalDist);
+                curLat = leg.startCoord[0] + ratio * (leg.endCoord[0] - leg.startCoord[0]);
+                curLng = leg.startCoord[1] + ratio * (leg.endCoord[1] - leg.startCoord[1]);
+            } else if (leg.type === "ARRIVED") {
+                curLat = leg.endCoord[0];
+                curLng = leg.endCoord[1];
+            }
+
+            userMarker.setLatLng([curLat, curLng]);
+            map.panTo([curLat, curLng]);
+
+            // 2. Tính tổng cự ly còn lại đến đích
+            let remainingMeters = leg.currentDist;
+            for (let i = currentStepIdx + 1; i < simulatedRoute.length; i++) {
+                remainingMeters += simulatedRoute[i].currentDist;
+            }
+            document.getElementById('distRemain').innerText = `${remainingMeters} m`;
+
+            // 3. Cập nhật Sidebar Highlight & HUD
+            document.getElementById('stepIcon').innerText = leg.icon;
+            document.getElementById('stepTitle').innerText = leg.title;
+            document.getElementById('stepSub').innerText = leg.sub;
+
+            const txtStepStatus = document.getElementById('txtStepStatus');
+            if (txtStepStatus) {
+                txtStepStatus.innerText = leg.type === "STRAIGHT" ? `Còn ${leg.currentDist}m` : "Đang rẽ hướng";
+            }
+
+            // 4. Cập nhật Banner dưới Camera
+            bannerIcon.innerText = leg.icon;
+            bannerText.innerText = `${leg.title} • ${leg.sub}`;
+        }
+
+        // ĐẶT LẠI LỘ TRÌNH TỪ ĐẦU
+        function resetNavigationRoute() {
+            currentStepIdx = 0;
+            simulatedRoute[0].currentDist = simulatedRoute[0].totalDist;
+            simulatedRoute[2].currentDist = simulatedRoute[2].totalDist;
+            simulatedRoute[3].currentDist = simulatedRoute[3].totalDist;
+
+            updateNavigationState();
+            addLog("alert-info", "[LỘ TRÌNH] Đã khởi động lại lộ trình từ điểm xuất phát.");
+            speakBlaze("Khởi động lại lộ trình dẫn đường. Đi thẳng hai mươi lăm mét.", "FORCE");
+        }
+
+        // ==========================================
         // VẼ KHUNG HÌNH AR THỜI GIAN THỰC (CANVAS LOOP)
         // ==========================================
         let frameCount = 0;
         let lastFpsTime = performance.now();
-
-        // QUY ĐỊNH KHOẢNG CÁCH AN TOÀN: DƯỚI 1.8 MÉT MỚI BÁO STOP / NGUY HIỂM!
         const DANGER_DISTANCE_THRESHOLD = 1.8;
 
         function renderLoop() {
             if (!isCamActive) return;
+
+            // Phân tích cử động camera (Optical Flow)
+            processCameraMotion();
 
             frameCount++;
             const now = performance.now();
@@ -932,7 +1508,6 @@
                 const isPerson = rawName === "person" || rawName.includes("người");
                 const vnName = getVietnameseName(rawName);
 
-                // Lấy khoảng cách ước lượng từ backend hoặc tự tính
                 let distM = obj.distance_m;
                 if (!distM) {
                     if (isPerson) {
@@ -949,7 +1524,6 @@
 
                 if (inRoi) {
                     inCorridorCount++;
-                    // KIỂM TRA ĐIỀU KIỆN KHOẢNG CÁCH: CHỈ BÁO NGUY HIỂM KHI DƯỚI 1.8 MÉT!
                     if (distM <= DANGER_DISTANCE_THRESHOLD) {
                         if (distM < closestDistance) closestDistance = distM;
 
@@ -959,19 +1533,16 @@
                             obstacleInDanger = true;
                             obstacleName = vnName;
                         }
-                        // Bounding Box ĐỎ / VÀNG RỰC KHI ĐI VÀO CỰ LY GẦN (< 1.8m)
                         drawBoundingBox(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, `${isPerson ? 'NGƯỜI' : vnName.toUpperCase()} • ${distM}m (NGUY HIỂM)`, isPerson ? '#ff3366' : '#ffb703', true);
                     } else {
-                        // VẬT THỂ Ở XA (> 1.8m): KHÔNG BÁO NGUY HIỂM! LỐI ĐI VẪN AN TOÀN!
                         drawBoundingBox(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, `${isPerson ? 'Người' : vnName} • ${distM}m (ở xa, an toàn)`, 'rgba(0, 240, 255, 0.65)', false);
                     }
                 } else {
-                    // Ngoài hành lang đi bộ: Box xám mờ an toàn
                     drawBoundingBox(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, `${isPerson ? 'Người' : vnName} • ${distM}m (ngoài lề)`, 'rgba(140, 156, 184, 0.4)', false);
                 }
             });
 
-            // Nút Giả lập người (cho thuyết trình: cự ly 1.2m)
+            // Nút Giả lập người (cự ly 1.2m)
             if (simulatedPersonActive) {
                 personInDanger = true;
                 closestDistance = 1.2;
@@ -979,7 +1550,7 @@
                 drawBoundingBox(w * 0.38, h * 0.42, w * 0.24, h * 0.45, "NGƯỜI (GIẢ LẬP) • 1.2m (NGUY HIỂM)", "#ff3366", true);
             }
 
-            // Nút Giả lập vật cản (cho thuyết trình: cự ly 0.8m)
+            // Nút Giả lập vật cản (cự ly 0.8m)
             if (simulatedObstacleActive) {
                 obstacleInDanger = true;
                 obstacleName = "vật cản";
@@ -988,14 +1559,13 @@
                 drawBoundingBox(w * 0.36, h * 0.55, w * 0.28, h * 0.32, "VẬT CẢN (GIẢ LẬP) • 0.8m (NGUY HIỂM)", "#ffb703", true);
             }
 
-            // 3. CẬP NHẬT TRẠNG THÁI HUD & GIỌNG NÓI TIẾNG VIỆT
+            // 3. CẬP NHẬT TRẠNG THÁI HUD & GIỌNG NÓI
             if (personInDanger) {
                 safeStatus.innerText = `🛑 CẢNH BÁO: CÓ NGƯỜI (${closestDistance}m)!`;
                 safeStatus.style.color = "var(--neon-red)";
                 mainBanner.className = "hud-bottom-banner hazard-person";
                 bannerIcon.innerText = "🛑";
                 bannerText.innerText = `CẢNH BÁO: Có người ở ngay trước mặt (${closestDistance}m)!`;
-                navigationDirection = "HAZARD_PERSON";
 
                 speakBlaze(`Cảnh báo, có người ở ngay trước mặt cách ${closestDistance} mét, hãy dừng lại!`, "HIGH");
 
@@ -1005,7 +1575,6 @@
                 mainBanner.className = "hud-bottom-banner hazard-obstacle";
                 bannerIcon.innerText = "⚠️";
                 bannerText.innerText = `Cảnh báo: Có ${obstacleName} ở phía trước (${closestDistance}m)!`;
-                navigationDirection = "HAZARD_OBSTACLE";
 
                 speakBlaze(`Cảnh báo, có ${obstacleName} ở phía trước cách ${closestDistance} mét, chú ý bước chân!`, "HIGH");
 
@@ -1013,12 +1582,14 @@
                 safeStatus.innerText = "✅ LỐI ĐI: AN TOÀN";
                 safeStatus.style.color = "var(--neon-green)";
                 mainBanner.className = "hud-bottom-banner";
-                updateNavBannerFromStep();
+                const curLeg = simulatedRoute[currentStepIdx];
+                bannerIcon.innerText = curLeg.icon;
+                bannerText.innerText = `${curLeg.title} • ${curLeg.sub}`;
             }
 
             objCount.innerText = `VẬT CẢN TRONG LÀN: ${inCorridorCount}`;
 
-            // 4. VẼ MŨI TÊN CHỈ ĐƯỜNG AR 3D CHUẨN XÁC TRÊN CAMERA
+            // 4. VẼ MŨI TÊN CHỈ ĐƯỜNG AR 3D TRÊN CAMERA
             drawArNavigationArrow(w, h, personInDanger, obstacleInDanger);
 
             requestAnimationFrame(renderLoop);
@@ -1050,7 +1621,7 @@
             ctx.stroke();
             ctx.setLineDash([]);
 
-            // Vạch xúc giác dẫn đường màu vàng ở chính giữa tim đường
+            // Vạch xúc giác dẫn đường màu vàng ở tim đường
             ctx.strokeStyle = "rgba(255, 183, 3, 0.75)";
             ctx.lineWidth = 6;
             ctx.beginPath();
@@ -1060,13 +1631,15 @@
         }
 
         // ==========================================
-        // VẼ MŨI TÊN CHỈ ĐƯỜNG AR 3D CHUẨN ĐƯỜNG CONG
+        // VẼ MŨI TÊN CHỈ ĐƯỜNG AR 3D ĐỘNG
         // ==========================================
         function drawArNavigationArrow(w, h, hasPerson, hasObstacle) {
             const time = performance.now() * 0.003;
             const bounce = Math.sin(time) * 8;
             const centerX = w * 0.5;
             const arrowBaseY = h * 0.82 + bounce;
+            const curLeg = simulatedRoute[currentStepIdx];
+            const navDir = curLeg.dir;
 
             ctx.save();
 
@@ -1110,8 +1683,8 @@
                 ctx.textAlign = "center";
                 ctx.fillText("!", centerX, arrowBaseY - 10);
 
-            } else if (navigationDirection === "LEFT") {
-                // ↰ MŨI TÊN CONG 90 ĐỘ RẼ TRÁI RÕ RÀNG
+            } else if (navDir === "LEFT") {
+                // ↰ MŨI TÊN CONG 90 ĐỘ RẼ TRÁI
                 ctx.shadowColor = "#00f0ff";
                 ctx.shadowBlur = 25;
                 ctx.fillStyle = "#00f0ff";
@@ -1119,13 +1692,11 @@
                 ctx.lineWidth = 14;
                 ctx.lineCap = "round";
 
-                // Đường cong uốn sang trái
                 ctx.beginPath();
                 ctx.moveTo(centerX, arrowBaseY + 10);
                 ctx.quadraticCurveTo(centerX, arrowBaseY - 45, centerX - 60, arrowBaseY - 45);
                 ctx.stroke();
 
-                // Đầu mũi tên nhọn chỉ sang trái
                 ctx.beginPath();
                 ctx.moveTo(centerX - 85, arrowBaseY - 45);
                 ctx.lineTo(centerX - 50, arrowBaseY - 65);
@@ -1133,7 +1704,6 @@
                 ctx.closePath();
                 ctx.fill();
 
-                // Các vạch Chevron phát sóng sang bên trái
                 const wave = (performance.now() * 0.05) % 35;
                 ctx.lineWidth = 4;
                 [20, 45].forEach(offset => {
@@ -1142,19 +1712,18 @@
                         ctx.beginPath();
                         ctx.moveTo(waveX + 15, arrowBaseY - 60);
                         ctx.lineTo(waveX, arrowBaseY - 45);
-                        ctx.lineTo(waveX + 15, arrowBaseY - 30);
+                        ctx.lineTo(waveX - 15, arrowBaseY - 30);
                         ctx.stroke();
                     }
                 });
 
-                // Chữ HUD chỉ dẫn
                 ctx.font = "bold 15px 'Outfit', sans-serif";
                 ctx.fillStyle = "#fff";
                 ctx.textAlign = "center";
-                ctx.fillText("↰ CHUẨN BỊ RẼ TRÁI (5M)", centerX - 30, arrowBaseY + 34);
+                ctx.fillText("↰ HÃY RẼ TRÁI (QUAY CAMERA SANG TRÁI)", centerX - 20, arrowBaseY + 34);
 
-            } else if (navigationDirection === "RIGHT") {
-                // ↱ MŨI TÊN CONG 90 ĐỘ RẼ PHẢI RÕ RÀNG
+            } else if (navDir === "RIGHT") {
+                // ↱ MŨI TÊN CONG 90 ĐỘ RẼ PHẢI
                 ctx.shadowColor = "#00f0ff";
                 ctx.shadowBlur = 25;
                 ctx.fillStyle = "#00f0ff";
@@ -1162,13 +1731,11 @@
                 ctx.lineWidth = 14;
                 ctx.lineCap = "round";
 
-                // Đường cong uốn sang phải
                 ctx.beginPath();
                 ctx.moveTo(centerX, arrowBaseY + 10);
                 ctx.quadraticCurveTo(centerX, arrowBaseY - 45, centerX + 60, arrowBaseY - 45);
                 ctx.stroke();
 
-                // Đầu mũi tên nhọn chỉ thẳng sang bên phải
                 ctx.beginPath();
                 ctx.moveTo(centerX + 85, arrowBaseY - 45);
                 ctx.lineTo(centerX + 50, arrowBaseY - 65);
@@ -1176,7 +1743,6 @@
                 ctx.closePath();
                 ctx.fill();
 
-                // Các vạch Chevron phát sóng sang bên phải
                 const wave = (performance.now() * 0.05) % 35;
                 ctx.lineWidth = 4;
                 [20, 45].forEach(offset => {
@@ -1190,11 +1756,32 @@
                     }
                 });
 
-                // Chữ HUD chỉ dẫn
                 ctx.font = "bold 15px 'Outfit', sans-serif";
                 ctx.fillStyle = "#fff";
                 ctx.textAlign = "center";
-                ctx.fillText("↱ RẼ PHẢI - ĐÃ TỚI ĐÍCH", centerX + 30, arrowBaseY + 34);
+                ctx.fillText("↱ HÃY RẼ PHẢI (QUAY CAMERA SANG PHẢI)", centerX + 20, arrowBaseY + 34);
+
+            } else if (navDir === "ARRIVED") {
+                // 🏁 BIỂN BÁO HOÀN TẤT ĐẾN ĐÍCH
+                ctx.shadowColor = "#00ff88";
+                ctx.shadowBlur = 30;
+                ctx.fillStyle = "#00ff88";
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 4;
+
+                ctx.beginPath();
+                ctx.arc(centerX, arrowBaseY - 35, 46, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = "#0b0f19";
+                ctx.font = "bold 32px 'Outfit', sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText("🏁", centerX, arrowBaseY - 24);
+
+                ctx.font = "bold 16px 'Outfit', sans-serif";
+                ctx.fillStyle = "#00ff88";
+                ctx.fillText("ĐÃ ĐẾN TRẠM XE BUÝT BẾN THÀNH", centerX, arrowBaseY + 34);
 
             } else {
                 // ⬆ MŨI TÊN ĐI THẲNG 3D NEON XANH LÁ
@@ -1213,7 +1800,6 @@
                 ctx.closePath();
                 ctx.fill();
 
-                // Dải sóng Chevron 3D lướt về phía trước
                 const waveOffset = (performance.now() * 0.05) % 45;
                 ctx.strokeStyle = "rgba(0, 255, 136, 0.75)";
                 ctx.lineWidth = 5;
@@ -1230,11 +1816,10 @@
                     }
                 });
 
-                // Chữ HUD chỉ dẫn
                 ctx.font = "bold 15px 'Outfit', sans-serif";
                 ctx.fillStyle = "#fff";
                 ctx.textAlign = "center";
-                ctx.fillText("TIẾP TỤC ĐI THẲNG", centerX, arrowBaseY + 34);
+                ctx.fillText(`TIẾP TỤC ĐI THẲNG (${curLeg.currentDist}M)`, centerX, arrowBaseY + 34);
             }
 
             ctx.restore();
@@ -1263,39 +1848,68 @@
         }
 
         // ==========================================
-        // CÁC NÚT ĐIỀU KHIỂN & MÔ PHỎNG THUYẾT TRÌNH
+        // CÁC SỰ KIỆN PHÍM TẮT & NÚT ĐIỀU KHIỂN
         // ==========================================
-        function updateNavBannerFromStep() {
-            const step = simulatedRoute[currentStepIdx];
-            bannerIcon.innerText = step.icon;
-            bannerText.innerText = `${step.step} • ${step.sub}`;
-            navigationDirection = step.dir;
-        }
-
-        // 1. NÚT ĐỔI HƯỚNG MŨI TÊN GPS
-        document.getElementById('btnNextStep').addEventListener('click', () => {
-            currentStepIdx = (currentStepIdx + 1) % simulatedRoute.length;
-            const step = simulatedRoute[currentStepIdx];
-
-            userMarker.setLatLng([step.lat, step.lng]);
-            map.panTo([step.lat, step.lng]);
-
-            document.getElementById('distRemain').innerText = step.dist;
-            document.getElementById('stepIcon').innerText = step.icon;
-            document.getElementById('stepTitle').innerText = step.step;
-            document.getElementById('stepSub').innerText = step.sub;
-
-            updateNavBannerFromStep();
-            addLog("alert-info", `[GPS] Tiến bước: "${step.step}"`);
-            speakBlaze(step.voice || step.step, "FORCE");
+        // 1. Phím tắt bàn phím: W (Đi tới), A (Quay trái), D (Quay phải)
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+                triggerCameraStep('keyboard');
+            } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+                triggerCameraTurn('LEFT', 'keyboard');
+            } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+                triggerCameraTurn('RIGHT', 'keyboard');
+            }
         });
 
-        // 2. NÚT THỬ GIỌNG ĐỌC BLAZE TIẾNG VIỆT
+        // 2. Con quay hồi chuyển thiết bị di động (Gyro / DeviceOrientation)
+        let lastAlpha = null;
+        window.addEventListener('deviceorientation', (e) => {
+            if (e.alpha !== null) {
+                if (lastAlpha !== null) {
+                    let dAlpha = e.alpha - lastAlpha;
+                    if (dAlpha > 180) dAlpha -= 360;
+                    if (dAlpha < -180) dAlpha += 360;
+
+                    if (dAlpha > 22) {
+                        triggerCameraTurn("RIGHT", "gyro");
+                    } else if (dAlpha < -22) {
+                        triggerCameraTurn("LEFT", "gyro");
+                    }
+                }
+                lastAlpha = e.alpha;
+            }
+        });
+
+        // 3. Nút mô phỏng cử động trực tiếp trên màn hình
+        document.getElementById('btnActionStep').addEventListener('click', () => {
+            triggerCameraStep('manual_button');
+        });
+
+        document.getElementById('btnActionTurnLeft').addEventListener('click', () => {
+            triggerCameraTurn('LEFT', 'manual_button');
+        });
+
+        document.getElementById('btnActionTurnRight').addEventListener('click', () => {
+            triggerCameraTurn('RIGHT', 'manual_button');
+        });
+
+        document.getElementById('btnResetRoute').addEventListener('click', resetNavigationRoute);
+
+        // 4. Nút đổi chặng GPS
+        document.getElementById('btnNextStep').addEventListener('click', () => {
+            currentStepIdx = (currentStepIdx + 1) % simulatedRoute.length;
+            updateNavigationState();
+            const step = simulatedRoute[currentStepIdx];
+            addLog("alert-info", `[GPS] Tiến bước: "${step.title}"`);
+            speakBlaze(step.voiceStart || step.voicePrompt || step.title, "FORCE");
+        });
+
+        // 5. Nút thử giọng Blaze
         document.getElementById('btnTestVoice').addEventListener('click', () => {
             speakBlaze("Xin chào! Tôi là trợ lý thị giác thông minh. Lối đi phía trước an toàn, hãy tiếp tục đi thẳng.", "FORCE");
         });
 
-        // 3. NÚT GIẢ LẬP CÓ NGƯỜI PHÍA TRƯỚC (CỰ LY 1.2M)
+        // 6. Nút giả lập người (1.2m)
         document.getElementById('btnSimulatePerson').addEventListener('click', () => {
             simulatedPersonActive = !simulatedPersonActive;
             const btn = document.getElementById('btnSimulatePerson');
@@ -1314,7 +1928,7 @@
             }
         });
 
-        // 4. NÚT GIẢ LẬP CÓ VẬT CẢN PHÍA TRƯỚC (CỰ LY 0.8M)
+        // 7. Nút giả lập vật cản (0.8m)
         document.getElementById('btnSimulateObstacle').addEventListener('click', () => {
             simulatedObstacleActive = !simulatedObstacleActive;
             const btn = document.getElementById('btnSimulateObstacle');
