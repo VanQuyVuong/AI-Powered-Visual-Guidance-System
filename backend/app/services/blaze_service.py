@@ -50,7 +50,7 @@ class BlazeService:
             response.raise_for_status()
             data = response.json()
             tts_id = data.get("id")
-            audio_url = f"https://api.blaze.vn/v1/tts/{tts_id}/play" if tts_id else None
+            audio_url = f"/api/v1/voice/audio/{tts_id}" if tts_id else None
             return {
                 "success": True,
                 "id": tts_id,
@@ -62,6 +62,19 @@ class BlazeService:
                 "success": False,
                 "error": str(e)
             }
+
+    def get_audio_bytes(self, tts_id: str) -> Optional[bytes]:
+        """
+        Tải trực tiếp luồng audio MP3 từ Blaze.vn kèm Bearer Token
+        """
+        try:
+            url = f"https://api.blaze.vn/v1/tts/{tts_id}/play"
+            res = requests.get(url, headers=self.headers, timeout=10)
+            if res.status_code == 200:
+                return res.content
+        except Exception as e:
+            print(f"Lỗi khi tải file audio từ Blaze: {e}")
+        return None
 
     def speech_to_text(
         self,

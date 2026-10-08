@@ -177,7 +177,6 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
-            /* MẶC ĐỊNH: Không lật gương (Góc nhìn thực tế POV của kính thông minh) */
             transition: transform 0.3s ease;
         }
 
@@ -241,14 +240,14 @@
         .hud-bottom-banner.hazard-person {
             border-color: var(--neon-red);
             box-shadow: 0 0 30px rgba(255, 51, 102, 0.65);
-            background: rgba(255, 51, 102, 0.3);
+            background: rgba(255, 51, 102, 0.35);
             animation: pulseRed 0.8s infinite alternate;
         }
 
         .hud-bottom-banner.hazard-obstacle {
             border-color: var(--neon-amber);
             box-shadow: 0 0 25px rgba(255, 183, 3, 0.6);
-            background: rgba(255, 183, 3, 0.25);
+            background: rgba(255, 183, 3, 0.3);
             animation: pulseAmber 0.8s infinite alternate;
         }
 
@@ -455,7 +454,7 @@
         <div class="sys-status-pills">
             <div class="pill active" id="pillAi">
                 <div class="dot-pulse"></div>
-                <span>YOLOv8 + ROI 3D</span>
+                <span>YOLOv8 + Cự Ly &lt;1.8m</span>
             </div>
             <div class="pill active" id="pillVoice">
                 <span>🎙️ Blaze TTS (Tiếng Việt Chuẩn)</span>
@@ -505,10 +504,10 @@
                     <span>🔊</span> Thử Giọng Blaze Tiếng Việt
                 </button>
                 <button class="btn-hud btn-secondary" id="btnSimulatePerson">
-                    <span>👤</span> Giả Lập Có Người
+                    <span>👤</span> Giả Lập Có Người (1.2m)
                 </button>
                 <button class="btn-hud btn-secondary" id="btnSimulateObstacle">
-                    <span>📦</span> Giả Lập Có Vật Cản
+                    <span>📦</span> Giả Lập Vật Cản (0.8m)
                 </button>
                 <button class="btn-hud btn-secondary" id="btnToggleMirror">
                     <span>🔄</span> Đổi Góc Nhìn POV
@@ -559,8 +558,8 @@
                         <b>HN-Nam-2-BL (Chuẩn VN)</b>
                     </div>
                     <div class="meta-box">
-                        <span>ĐỘ TRỄ VOICE:</span>
-                        <b>~0.3s (Backend Proxy)</b>
+                        <span>STREAM AUDIO:</span>
+                        <b>FastAPI Proxy (/audio)</b>
                     </div>
                     <div class="meta-box">
                         <span>TRẠNG THÁI:</span>
@@ -600,20 +599,18 @@
             "backpack": "ba lô",
             "handbag": "túi xách",
             "suitcase": "vali",
+            "cell phone": "điện thoại",
             "bottle": "chai nước",
             "cup": "cốc nước",
             "laptop": "máy tính",
-            "cell phone": "điện thoại",
-            "tv": "màn hình",
             "car": "ô tô",
             "motorcycle": "xe máy",
             "bicycle": "xe đạp",
+            "bus": "xe buýt",
             "dog": "con chó",
-            "cat": "con mèo",
-            "potted plant": "chậu cây",
             "door": "cửa",
-            "stair": "bậc thang",
-            "stairs": "cầu thang"
+            "stairs": "cầu thang",
+            "stop sign": "biển báo"
         };
 
         function getVietnameseName(className) {
@@ -622,7 +619,7 @@
         }
 
         // ==========================================
-        // HÀM ĐỌC GIỌNG NÓI TIẾNG VIỆT QUA BACKEND (BLAZE.VN TTS)
+        // HÀM ĐỌC GIỌNG NÓI TIẾNG VIỆT QUA FASTAPI PROXY BLAZE
         // ==========================================
         let lastSpeakTime = 0;
         let lastSpokenText = "";
@@ -630,7 +627,6 @@
 
         async function speakBlaze(text, priority = "MEDIUM") {
             const now = Date.now();
-            // Tránh spam cùng 1 câu nói trong vòng 4 giây
             if (now - lastSpeakTime < 4000 && text === lastSpokenText && priority !== "FORCE") {
                 return;
             }
@@ -645,7 +641,7 @@
             addLog("alert-info", `[VOICE TIẾNG VIỆT] "${text}"`);
 
             try {
-                // 1. GỌI QUA BACKEND FASTAPI PROXY (BLAZE.VN API KEY: 68f5578def0d2c60d7cd49e9743f0c27ede87304)
+                // 1. GỌI QUA BACKEND FASTAPI PROXY (KÈM TOKEN BLAZE)
                 const res = await fetch("/api/v1/voice/tts", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -668,10 +664,10 @@
                     }
                 }
             } catch (err) {
-                console.warn("Backend TTS proxy error, trying browser fallback:", err);
+                console.warn("Backend TTS stream error, using client fallback:", err);
             }
 
-            // 2. FALLBACK: NẾU OFFLINE HOẶC MẤT MẠNG, DÙNG BỘ ĐỌC TRÌNH DUYỆT (CHỈ TIẾNG VIỆT)
+            // 2. NẾU MẤT MẠNG HOẶC OFFLINE: Fallback bộ đọc tiếng Việt chuẩn
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
                 const utter = new SpeechSynthesisUtterance(text);
@@ -691,16 +687,16 @@
         const initialCoords = [10.7725, 106.6980];
         const map = L.map('gpsMap', { zoomControl: false }).setView(initialCoords, 18);
 
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            attribution: '© OpenStreetMap'
+            attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
         // Tuyến đường mô phỏng (4 chặng đi bộ)
         const simulatedRoute = [
-            { lat: 10.7725, lng: 106.6980, step: "Đi thẳng 25 mét", sub: "Lối đi phía trước thông thoáng", dir: "STRAIGHT", icon: "⬆️", dist: "85 m", voice: "Đi thẳng hai mươi lăm mét, lối đi thông thoáng." },
+            { lat: 10.7725, lng: 106.6980, step: "Đi thẳng 25 mét", sub: "Lối đi phía trước thông thoáng", dir: "STRAIGHT", icon: "⬆️", dist: "85 m", voice: "Đi thẳng hai mươi lăm mét, lối đi an toàn." },
             { lat: 10.7727, lng: 106.6980, step: "Chuẩn bị rẽ trái sau 5 mét", sub: "Rẽ trái theo vạch xúc giác", dir: "LEFT", icon: "↰", dist: "60 m", voice: "Chuẩn bị rẽ trái sau năm mét." },
-            { lat: 10.7727, lng: 106.6976, step: "Đi thẳng 30 mét", sub: "Mặt đường bằng phẳng, an toàn", dir: "STRAIGHT", icon: "⬆️", dist: "30 m", voice: "Đi thẳng ba mươi mét, tiếp tục giữ đúng vạch dẫn đường." },
+            { lat: 10.7727, lng: 106.6976, step: "Đi thẳng 30 mét", sub: "Mặt đường bằng phẳng, không có bậc thang", dir: "STRAIGHT", icon: "⬆️", dist: "30 m", voice: "Đi thẳng ba mươi mét, tiếp tục giữ đúng vạch dẫn đường." },
             { lat: 10.7729, lng: 106.6976, step: "Rẽ phải - Đã tới trạm xe buýt", sub: "Trạm Xe Buýt Bến Thành ở ngay bên phải", dir: "RIGHT", icon: "↱", dist: "5 m", voice: "Rẽ phải, bạn đã tới trạm xe buýt Bến Thành." }
         ];
 
@@ -816,7 +812,7 @@
                     };
 
                     addLog("alert-info", "[CAMERA] Bật Camera thành công.");
-                    speakBlaze("Hệ thống dẫn đường thông minh đã kích hoạt. Lối đi phía trước thông thoáng.", "FORCE");
+                    speakBlaze("Hệ thống dẫn đường thông minh đã kích hoạt. Lối đi an toàn.", "FORCE");
                 } catch (err) {
                     alert("Không thể mở Webcam: " + err.message);
                 }
@@ -865,12 +861,11 @@
         // ==========================================
         function isBoxInCorridor(b, w, h) {
             if (!b) return false;
-            // Điểm tiếp đất của vật thể: đáy giữa bounding box
             const bx = (b.x1 + b.x2) / 2;
             const by = b.y2;
 
             const topY = h * 0.45;
-            // 1. Nếu vật thể ở nửa trên màn hình (treo trên tường, quạt trần, giá sách) -> AN TOÀN!
+            // 1. Nếu vật thể ở nửa trên màn hình (treo trên tường, trần nhà, đèn) -> AN TOÀN!
             if (by < topY) return false;
 
             const centerX = w * 0.5;
@@ -891,6 +886,9 @@
         let frameCount = 0;
         let lastFpsTime = performance.now();
 
+        // QUY ĐỊNH KHOẢNG CÁCH AN TOÀN: DƯỚI 1.8 MÉT MỚI BÁO STOP / NGUY HIỂM!
+        const DANGER_DISTANCE_THRESHOLD = 1.8;
+
         function renderLoop() {
             if (!isCamActive) return;
 
@@ -909,13 +907,13 @@
             // 1. VẼ VÙNG QUAN TÂM (ROI) - LỐI ĐI AN TOÀN HÌNH THANG 3D
             drawSafeCorridor(w, h);
 
-            // 2. PHÂN TÍCH VẬT THỂ
-            let personInCorridor = false;
-            let obstacleInCorridor = false;
+            // 2. PHÂN TÍCH VẬT THỂ & ĐO KHOẢNG CÁCH (METERS)
+            let personInDanger = false;
+            let obstacleInDanger = false;
             let obstacleName = "";
+            let closestDistance = 99.0;
             let inCorridorCount = 0;
 
-            // Tỷ lệ chuyển đổi tọa độ từ Backend (320x240) sang Canvas hiển thị thực tế
             const scaleX = w / (backendImgSize.width || 320);
             const scaleY = h / (backendImgSize.height || 240);
 
@@ -923,7 +921,6 @@
                 const rawB = obj.bounding_box;
                 if (!rawB) return;
 
-                // Scale tọa độ khớp chính xác 100% với canvas
                 const b = {
                     x1: rawB.x1 * scaleX,
                     y1: rawB.y1 * scaleY,
@@ -935,62 +932,82 @@
                 const isPerson = rawName === "person" || rawName.includes("người");
                 const vnName = getVietnameseName(rawName);
 
-                // KIỂM TRA: VẬT THỂ CÓ NẰM TRONG HÌNH THANG AN TOÀN KHÔNG?
+                // Lấy khoảng cách ước lượng từ backend hoặc tự tính
+                let distM = obj.distance_m;
+                if (!distM) {
+                    if (isPerson) {
+                        const hRatio = (b.y2 - b.y1) / h;
+                        distM = Math.round(Math.max(0.5, 0.88 / Math.max(0.12, hRatio)) * 10) / 10;
+                    } else {
+                        const topY = h * 0.45;
+                        const prog = Math.min(1.0, Math.max(0.0, (b.y2 - topY) / (h - topY)));
+                        distM = Math.round(Math.max(0.3, 2.6 - prog * 2.2) * 10) / 10;
+                    }
+                }
+
                 const inRoi = isBoxInCorridor(b, w, h);
 
                 if (inRoi) {
                     inCorridorCount++;
-                    if (isPerson) {
-                        personInCorridor = true;
+                    // KIỂM TRA ĐIỀU KIỆN KHOẢNG CÁCH: CHỈ BÁO NGUY HIỂM KHI DƯỚI 1.8 MÉT!
+                    if (distM <= DANGER_DISTANCE_THRESHOLD) {
+                        if (distM < closestDistance) closestDistance = distM;
+
+                        if (isPerson) {
+                            personInDanger = true;
+                        } else {
+                            obstacleInDanger = true;
+                            obstacleName = vnName;
+                        }
+                        // Bounding Box ĐỎ / VÀNG RỰC KHI ĐI VÀO CỰ LY GẦN (< 1.8m)
+                        drawBoundingBox(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, `${isPerson ? 'NGƯỜI' : vnName.toUpperCase()} • ${distM}m (NGUY HIỂM)`, isPerson ? '#ff3366' : '#ffb703', true);
                     } else {
-                        obstacleInCorridor = true;
-                        obstacleName = vnName;
+                        // VẬT THỂ Ở XA (> 1.8m): KHÔNG BÁO NGUY HIỂM! LỐI ĐI VẪN AN TOÀN!
+                        drawBoundingBox(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, `${isPerson ? 'Người' : vnName} • ${distM}m (ở xa, an toàn)`, 'rgba(0, 240, 255, 0.65)', false);
                     }
-                    // Vẽ Bounding Box ĐẬM khi lọt vào vùng an toàn
-                    drawBoundingBox(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, `${isPerson ? 'NGƯỜI' : vnName.toUpperCase()} (TRONG LỐI ĐI)`, isPerson ? '#ff3366' : '#ffb703', true);
                 } else {
-                    // Vẽ Bounding Box MỜ nếu nằm ngoài lề (an toàn, không gây cảnh báo)
-                    drawBoundingBox(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, `${isPerson ? 'Người' : vnName} (ngoài lề, an toàn)`, 'rgba(140, 156, 184, 0.45)', false);
+                    // Ngoài hành lang đi bộ: Box xám mờ an toàn
+                    drawBoundingBox(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, `${isPerson ? 'Người' : vnName} • ${distM}m (ngoài lề)`, 'rgba(140, 156, 184, 0.4)', false);
                 }
             });
 
-            // Nút Giả lập người (cho buổi thuyết trình)
+            // Nút Giả lập người (cho thuyết trình: cự ly 1.2m)
             if (simulatedPersonActive) {
-                personInCorridor = true;
+                personInDanger = true;
+                closestDistance = 1.2;
                 inCorridorCount++;
-                drawBoundingBox(w * 0.38, h * 0.42, w * 0.24, h * 0.45, "NGƯỜI (GIẢ LẬP) • 1.2m", "#ff3366", true);
+                drawBoundingBox(w * 0.38, h * 0.42, w * 0.24, h * 0.45, "NGƯỜI (GIẢ LẬP) • 1.2m (NGUY HIỂM)", "#ff3366", true);
             }
 
-            // Nút Giả lập vật cản (ghế/thùng hàng)
+            // Nút Giả lập vật cản (cho thuyết trình: cự ly 0.8m)
             if (simulatedObstacleActive) {
-                obstacleInCorridor = true;
+                obstacleInDanger = true;
                 obstacleName = "vật cản";
+                closestDistance = 0.8;
                 inCorridorCount++;
-                drawBoundingBox(w * 0.36, h * 0.55, w * 0.28, h * 0.32, "VẬT CẢN (GIẢ LẬP) • 0.8m", "#ffb703", true);
+                drawBoundingBox(w * 0.36, h * 0.55, w * 0.28, h * 0.32, "VẬT CẢN (GIẢ LẬP) • 0.8m (NGUY HIỂM)", "#ffb703", true);
             }
 
-            // 3. CẬP NHẬT TRẠNG THÁI HUD & GIỌNG NÓI TIẾNG VIỆT CHUẨN XÁC
-            if (personInCorridor) {
-                safeStatus.innerText = "🛑 CẢNH BÁO: CÓ NGƯỜI!";
+            // 3. CẬP NHẬT TRẠNG THÁI HUD & GIỌNG NÓI TIẾNG VIỆT
+            if (personInDanger) {
+                safeStatus.innerText = `🛑 CẢNH BÁO: CÓ NGƯỜI (${closestDistance}m)!`;
                 safeStatus.style.color = "var(--neon-red)";
                 mainBanner.className = "hud-bottom-banner hazard-person";
                 bannerIcon.innerText = "🛑";
-                bannerText.innerText = "CẢNH BÁO: Có người đang đứng ở ngay phía trước!";
+                bannerText.innerText = `CẢNH BÁO: Có người ở ngay trước mặt (${closestDistance}m)!`;
                 navigationDirection = "HAZARD_PERSON";
 
-                // Giọng nói tiếng Việt khi có người
-                speakBlaze("Cảnh báo, có người ở ngay trước mặt, hãy đi chậm lại hoặc dừng lại!", "HIGH");
+                speakBlaze(`Cảnh báo, có người ở ngay trước mặt cách ${closestDistance} mét, hãy dừng lại!`, "HIGH");
 
-            } else if (obstacleInCorridor) {
-                safeStatus.innerText = "⚠️ CẢNH BÁO: CÓ VẬT CẢN!";
+            } else if (obstacleInDanger) {
+                safeStatus.innerText = `⚠️ CẢNH BÁO: CÓ VẬT CẢN (${closestDistance}m)!`;
                 safeStatus.style.color = "var(--neon-amber)";
                 mainBanner.className = "hud-bottom-banner hazard-obstacle";
                 bannerIcon.innerText = "⚠️";
-                bannerText.innerText = `Cảnh báo: Có ${obstacleName} chắn ở phía trước!`;
+                bannerText.innerText = `Cảnh báo: Có ${obstacleName} ở phía trước (${closestDistance}m)!`;
                 navigationDirection = "HAZARD_OBSTACLE";
 
-                // Giọng nói tiếng Việt khi có vật cản
-                speakBlaze(`Cảnh báo, có ${obstacleName} ở ngay trước mặt, chú ý bước chân!`, "HIGH");
+                speakBlaze(`Cảnh báo, có ${obstacleName} ở phía trước cách ${closestDistance} mét, chú ý bước chân!`, "HIGH");
 
             } else {
                 safeStatus.innerText = "✅ LỐI ĐI: AN TOÀN";
@@ -1001,8 +1018,8 @@
 
             objCount.innerText = `VẬT CẢN TRONG LÀN: ${inCorridorCount}`;
 
-            // 4. VẼ MŨI TÊN CHỈ ĐƯỜNG AR 3D MÔ PHỎNG TRỰC TIẾP TRÊN HÌNH ẢNH CAMERA
-            drawArNavigationArrow(w, h, personInCorridor, obstacleInCorridor);
+            // 4. VẼ MŨI TÊN CHỈ ĐƯỜNG AR 3D CHUẨN XÁC TRÊN CAMERA
+            drawArNavigationArrow(w, h, personInDanger, obstacleInDanger);
 
             requestAnimationFrame(renderLoop);
         }
@@ -1043,18 +1060,18 @@
         }
 
         // ==========================================
-        // VẼ MŨI TÊN CHỈ ĐƯỜNG AR 3D MÔ PHỎNG TRỰC TIẾP TRÊN CAMERA
+        // VẼ MŨI TÊN CHỈ ĐƯỜNG AR 3D CHUẨN ĐƯỜNG CONG
         // ==========================================
         function drawArNavigationArrow(w, h, hasPerson, hasObstacle) {
             const time = performance.now() * 0.003;
-            const bounce = Math.sin(time) * 10;
+            const bounce = Math.sin(time) * 8;
             const centerX = w * 0.5;
-            const arrowBaseY = h * 0.80 + bounce;
+            const arrowBaseY = h * 0.82 + bounce;
 
             ctx.save();
 
             if (hasPerson) {
-                // 🛑 BIỂU TƯỢNG BIỂN BÁO STOP ĐỎ RỰC 3D
+                // 🛑 BIỂN BÁO STOP ĐỎ RỰC 3D
                 ctx.shadowColor = "#ff3366";
                 ctx.shadowBlur = 30;
                 ctx.fillStyle = "#ff3366";
@@ -1062,7 +1079,7 @@
                 ctx.lineWidth = 4;
 
                 ctx.beginPath();
-                const sz = 42;
+                const sz = 44;
                 ctx.arc(centerX, arrowBaseY - 35, sz, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.stroke();
@@ -1073,7 +1090,7 @@
                 ctx.fillText("STOP", centerX, arrowBaseY - 26);
 
             } else if (hasObstacle) {
-                // ⚠️ BIỂU TƯỢNG CẢNH BÁO VẬT CẢN TAM GIÁC VÀNG
+                // ⚠️ BIỂN BÁO TAM GIÁC VÀNG
                 ctx.shadowColor = "#ffb703";
                 ctx.shadowBlur = 25;
                 ctx.fillStyle = "#ffb703";
@@ -1094,74 +1111,97 @@
                 ctx.fillText("!", centerX, arrowBaseY - 10);
 
             } else if (navigationDirection === "LEFT") {
-                // ↰ MŨI TÊN AR RẼ TRÁI 3D (CYAN GLOWING NEON)
+                // ↰ MŨI TÊN CONG 90 ĐỘ RẼ TRÁI RÕ RÀNG
                 ctx.shadowColor = "#00f0ff";
                 ctx.shadowBlur = 25;
                 ctx.fillStyle = "#00f0ff";
+                ctx.strokeStyle = "#00f0ff";
+                ctx.lineWidth = 14;
+                ctx.lineCap = "round";
 
+                // Đường cong uốn sang trái
                 ctx.beginPath();
-                ctx.moveTo(centerX - 35, arrowBaseY - 70);
-                ctx.lineTo(centerX - 90, arrowBaseY - 35);
-                ctx.lineTo(centerX - 55, arrowBaseY - 35);
-                ctx.lineTo(centerX - 55, arrowBaseY + 10);
-                ctx.lineTo(centerX - 15, arrowBaseY + 10);
-                ctx.lineTo(centerX - 15, arrowBaseY - 35);
-                ctx.lineTo(centerX + 20, arrowBaseY - 35);
+                ctx.moveTo(centerX, arrowBaseY + 10);
+                ctx.quadraticCurveTo(centerX, arrowBaseY - 45, centerX - 60, arrowBaseY - 45);
+                ctx.stroke();
+
+                // Đầu mũi tên nhọn chỉ sang trái
+                ctx.beginPath();
+                ctx.moveTo(centerX - 85, arrowBaseY - 45);
+                ctx.lineTo(centerX - 50, arrowBaseY - 65);
+                ctx.lineTo(centerX - 50, arrowBaseY - 25);
                 ctx.closePath();
                 ctx.fill();
 
-                // Vòng sóng quét định hướng rẽ trái
-                ctx.strokeStyle = "rgba(0, 240, 255, 0.75)";
-                ctx.lineWidth = 5;
-                ctx.lineCap = "round";
-                ctx.beginPath();
-                ctx.arc(centerX - 90, arrowBaseY - 35, 30, 0.75 * Math.PI, 1.45 * Math.PI);
-                ctx.stroke();
+                // Các vạch Chevron phát sóng sang bên trái
+                const wave = (performance.now() * 0.05) % 35;
+                ctx.lineWidth = 4;
+                [20, 45].forEach(offset => {
+                    const waveX = centerX - 85 - offset + wave;
+                    if (waveX > centerX - 140) {
+                        ctx.beginPath();
+                        ctx.moveTo(waveX + 15, arrowBaseY - 60);
+                        ctx.lineTo(waveX, arrowBaseY - 45);
+                        ctx.lineTo(waveX + 15, arrowBaseY - 30);
+                        ctx.stroke();
+                    }
+                });
 
-                // Chữ HUD chỉ dẫn trên sàn
+                // Chữ HUD chỉ dẫn
                 ctx.font = "bold 15px 'Outfit', sans-serif";
                 ctx.fillStyle = "#fff";
                 ctx.textAlign = "center";
-                ctx.fillText("RẼ TRÁI SAU 5M", centerX, arrowBaseY + 32);
+                ctx.fillText("↰ CHUẨN BỊ RẼ TRÁI (5M)", centerX - 30, arrowBaseY + 34);
 
             } else if (navigationDirection === "RIGHT") {
-                // ↱ MŨI TÊN AR RẼ PHẢI 3D
+                // ↱ MŨI TÊN CONG 90 ĐỘ RẼ PHẢI RÕ RÀNG
                 ctx.shadowColor = "#00f0ff";
                 ctx.shadowBlur = 25;
                 ctx.fillStyle = "#00f0ff";
+                ctx.strokeStyle = "#00f0ff";
+                ctx.lineWidth = 14;
+                ctx.lineCap = "round";
 
+                // Đường cong uốn sang phải
                 ctx.beginPath();
-                ctx.moveTo(centerX + 35, arrowBaseY - 70);
-                ctx.lineTo(centerX + 90, arrowBaseY - 35);
-                ctx.lineTo(centerX + 55, arrowBaseY - 35);
-                ctx.lineTo(centerX + 55, arrowBaseY + 10);
-                ctx.lineTo(centerX + 15, arrowBaseY + 10);
-                ctx.lineTo(centerX + 15, arrowBaseY - 35);
-                ctx.lineTo(centerX - 20, arrowBaseY - 35);
+                ctx.moveTo(centerX, arrowBaseY + 10);
+                ctx.quadraticCurveTo(centerX, arrowBaseY - 45, centerX + 60, arrowBaseY - 45);
+                ctx.stroke();
+
+                // Đầu mũi tên nhọn chỉ thẳng sang bên phải
+                ctx.beginPath();
+                ctx.moveTo(centerX + 85, arrowBaseY - 45);
+                ctx.lineTo(centerX + 50, arrowBaseY - 65);
+                ctx.lineTo(centerX + 50, arrowBaseY - 25);
                 ctx.closePath();
                 ctx.fill();
 
-                // Vòng sóng quét định hướng rẽ phải
-                ctx.strokeStyle = "rgba(0, 240, 255, 0.75)";
-                ctx.lineWidth = 5;
-                ctx.lineCap = "round";
-                ctx.beginPath();
-                ctx.arc(centerX + 90, arrowBaseY - 35, 30, 1.55 * Math.PI, 0.25 * Math.PI);
-                ctx.stroke();
+                // Các vạch Chevron phát sóng sang bên phải
+                const wave = (performance.now() * 0.05) % 35;
+                ctx.lineWidth = 4;
+                [20, 45].forEach(offset => {
+                    const waveX = centerX + 85 + offset - wave;
+                    if (waveX < centerX + 140) {
+                        ctx.beginPath();
+                        ctx.moveTo(waveX - 15, arrowBaseY - 60);
+                        ctx.lineTo(waveX, arrowBaseY - 45);
+                        ctx.lineTo(waveX - 15, arrowBaseY - 30);
+                        ctx.stroke();
+                    }
+                });
 
-                // Chữ HUD chỉ dẫn trên sàn
+                // Chữ HUD chỉ dẫn
                 ctx.font = "bold 15px 'Outfit', sans-serif";
                 ctx.fillStyle = "#fff";
                 ctx.textAlign = "center";
-                ctx.fillText("RẼ PHẢI - ĐÃ TỚI ĐÍCH", centerX, arrowBaseY + 32);
+                ctx.fillText("↱ RẼ PHẢI - ĐÃ TỚI ĐÍCH", centerX + 30, arrowBaseY + 34);
 
             } else {
-                // ⬆ MŨI TÊN AR ĐI THẲNG 3D (NEON GREEN CỰC LỚN + CHEVRON SÓNG CHUYỂN ĐỘNG)
+                // ⬆ MŨI TÊN ĐI THẲNG 3D NEON XANH LÁ
                 ctx.shadowColor = "#00ff88";
                 ctx.shadowBlur = 25;
                 ctx.fillStyle = "rgba(0, 255, 136, 0.95)";
 
-                // Mũi tên chính
                 ctx.beginPath();
                 ctx.moveTo(centerX, arrowBaseY - 85);
                 ctx.lineTo(centerX + 42, arrowBaseY - 35);
@@ -1173,7 +1213,7 @@
                 ctx.closePath();
                 ctx.fill();
 
-                // Các vạch Chevron 3D lướt về phía trước tạo chiều sâu không gian
+                // Dải sóng Chevron 3D lướt về phía trước
                 const waveOffset = (performance.now() * 0.05) % 45;
                 ctx.strokeStyle = "rgba(0, 255, 136, 0.75)";
                 ctx.lineWidth = 5;
@@ -1190,7 +1230,7 @@
                     }
                 });
 
-                // Chữ HUD chỉ dẫn trên sàn
+                // Chữ HUD chỉ dẫn
                 ctx.font = "bold 15px 'Outfit', sans-serif";
                 ctx.fillStyle = "#fff";
                 ctx.textAlign = "center";
@@ -1213,7 +1253,7 @@
             ctx.strokeRect(x, y, bw, bh);
 
             ctx.fillStyle = isHighlight ? color : "rgba(11, 15, 25, 0.75)";
-            ctx.fillRect(x, y - 26, Math.max(bw, 140), 26);
+            ctx.fillRect(x, y - 26, Math.max(bw, 160), 26);
 
             ctx.fillStyle = "#ffffff";
             ctx.font = "bold 13px 'JetBrains Mono', monospace";
@@ -1255,7 +1295,7 @@
             speakBlaze("Xin chào! Tôi là trợ lý thị giác thông minh. Lối đi phía trước an toàn, hãy tiếp tục đi thẳng.", "FORCE");
         });
 
-        // 3. NÚT GIẢ LẬP CÓ NGƯỜI PHÍA TRƯỚC
+        // 3. NÚT GIẢ LẬP CÓ NGƯỜI PHÍA TRƯỚC (CỰ LY 1.2M)
         document.getElementById('btnSimulatePerson').addEventListener('click', () => {
             simulatedPersonActive = !simulatedPersonActive;
             const btn = document.getElementById('btnSimulatePerson');
@@ -1264,17 +1304,17 @@
                 btn.style.borderColor = "var(--neon-red)";
                 btn.style.color = "var(--neon-red)";
                 btn.innerHTML = "<span>❌</span> Hủy Giả Lập Người";
-                addLog("alert-danger", "[CẢNH BÁO] Có người xuất hiện ở ngay trước mặt!");
-                speakBlaze("Cảnh báo, có người ở ngay trước mặt, hãy đi chậm lại hoặc dừng lại!", "FORCE");
+                addLog("alert-danger", "[CẢNH BÁO] Có người xuất hiện ở cự ly gần 1.2 mét!");
+                speakBlaze("Cảnh báo, có người ở ngay trước mặt cách 1.2 mét, hãy dừng lại!", "FORCE");
             } else {
                 btn.style.borderColor = "rgba(255, 255, 255, 0.15)";
                 btn.style.color = "var(--text-main)";
-                btn.innerHTML = "<span>👤</span> Giả Lập Có Người";
+                btn.innerHTML = "<span>👤</span> Giả Lập Có Người (1.2m)";
                 addLog("alert-info", "[AN TOÀN] Vùng quan tâm đã thông thoáng.");
             }
         });
 
-        // 4. NÚT GIẢ LẬP CÓ VẬT CẢN PHÍA TRƯỚC
+        // 4. NÚT GIẢ LẬP CÓ VẬT CẢN PHÍA TRƯỚC (CỰ LY 0.8M)
         document.getElementById('btnSimulateObstacle').addEventListener('click', () => {
             simulatedObstacleActive = !simulatedObstacleActive;
             const btn = document.getElementById('btnSimulateObstacle');
@@ -1283,12 +1323,12 @@
                 btn.style.borderColor = "var(--neon-amber)";
                 btn.style.color = "var(--neon-amber)";
                 btn.innerHTML = "<span>❌</span> Hủy Giả Lập Vật Cản";
-                addLog("alert-warn", "[CẢNH BÁO] Có vật cản xuất hiện ở ngay trước mặt!");
-                speakBlaze("Cảnh báo, có vật cản ở ngay trước mặt, chú ý bước chân!", "FORCE");
+                addLog("alert-warn", "[CẢNH BÁO] Có vật cản xuất hiện ở cự ly gần 0.8 mét!");
+                speakBlaze("Cảnh báo, có vật cản ở ngay trước mặt cách 0.8 mét, chú ý bước chân!", "FORCE");
             } else {
                 btn.style.borderColor = "rgba(255, 255, 255, 0.15)";
                 btn.style.color = "var(--text-main)";
-                btn.innerHTML = "<span>📦</span> Giả Lập Có Vật Cản";
+                btn.innerHTML = "<span>📦</span> Giả Lập Vật Cản (0.8m)";
                 addLog("alert-info", "[AN TOÀN] Vùng quan tâm đã thông thoáng.");
             }
         });
