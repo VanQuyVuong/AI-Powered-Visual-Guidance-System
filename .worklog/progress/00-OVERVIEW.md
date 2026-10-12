@@ -25,3 +25,9 @@ Tài liệu này dùng để theo dõi tiến độ công việc dựa trên `TE
 
 ### Sprint 4: Tích hợp End-to-End
 - [ ] **End-to-End:** `Camera App → FastAPI → YOLO → Decision Engine → Voice API → Phát âm thanh trên App`.
+
+---
+
+## 🔮 Nâng cấp & Tính năng Mở rộng (Post-MVP & Extensions)
+- [x] **YOLO Upgrade:** Nâng cấp detector từ YOLOv8n lên **YOLO11n** (bản mới nhất từ Ultralytics, nhẹ hơn, độ chính xác cao hơn).
+- [x] **SpatialLM 3D Vision:** Tích hợp mô hình 3D Multimodal LLM cho chế độ khảo sát không gian phòng (Ý tưởng #6 trong `.docs/IDEAS.md`).

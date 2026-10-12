@@ -3,8 +3,8 @@ import numpy as np
 from ultralytics import YOLO
 
 # Tải model ở ngoài hàm để nó chỉ load 1 lần khi bật server, không load lại mỗi khi có request
-print("Đang khởi tạo model YOLO...")
-model = YOLO('yolov8n.pt')
+print("Đang khởi tạo model YOLO11 (bản mới nhất)...")
+model = YOLO('yolo11n.pt')
 
 def run_inference(image_bytes: bytes):
     """

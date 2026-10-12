@@ -20,3 +20,8 @@ __pycache__/
 
 # Dữ liệu test
 test_images/
+
+# Thư mục nghiên cứu mô hình 3D tham khảo bên ngoài (Tránh xung đột Git)
+1/
+SpatialLM/
+research*/

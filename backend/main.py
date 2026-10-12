@@ -33,6 +33,16 @@ async def serve_web_demo():
         return FileResponse(static_file)
     return {"message": "AI Visual Guidance API is running. Web demo not found."}
 
+@app.get("/api/v1/sample-3d-video")
+async def get_sample_3d_video():
+    """
+    Phục vụ video mẫu 3D SpatialLM (test_images/Video_test_3d.mp4) cho giao diện web
+    """
+    video_path = os.path.join(os.path.dirname(__file__), "..", "test_images", "Video_test_3d.mp4")
+    if os.path.exists(video_path):
+        return FileResponse(video_path, media_type="video/mp4")
+    raise HTTPException(status_code=404, detail="Video_test_3d.mp4 not found")
+
 @app.post("/api/v1/vision/analyze", response_model=VisionAnalyzeResponse)
 async def analyze_image(image: UploadFile = File(...)):
     """
@@ -129,6 +139,30 @@ async def voice_tts(request: TtsRequest):
     )
     return result
 
+# ==========================================
+# API KHẢO SÁT KHÔNG GIAN 3 CHIỀU (3D SPATIAL VISION / IOT)
+# ==========================================
+from app.vision.spatial_service import spatial_service
+
+@app.post("/api/v1/spatial/inspect-room")
+async def inspect_room_api(
+    image: Optional[UploadFile] = File(None),
+    prompt: Optional[str] = "Khảo sát không gian phòng và định vị vật thể"
+):
+    """
+    API Khảo sát không gian 3 chiều (Spatial Inspection) dành cho Thiết bị IoT / Kính thông minh.
+    Nhận diện kết cấu phòng (cửa, cửa sổ, bàn ghế) kèm tọa độ 3D và khoảng cách mét thực tế.
+    """
+    img_bytes = None
+    if image and image.content_type and image.content_type.startswith("image/"):
+        img_bytes = await image.read()
+        
+    result = spatial_service.inspect_room(
+        image_bytes=img_bytes,
+        custom_prompt=prompt
+    )
+    return result
+
 @app.get("/api/v1/voice/audio/{tts_id}")
 async def get_audio_proxy(tts_id: str):
     """
@@ -138,6 +172,82 @@ async def get_audio_proxy(tts_id: str):
     if not audio_content:
         raise HTTPException(status_code=404, detail="Không tải được file âm thanh từ Blaze")
     return Response(content=audio_content, media_type="audio/mpeg")
+
+@app.get("/api/v1/voice/sample")
+async def get_sample_voice():
+    """
+    Phục vụ trực tiếp file âm thanh mẫu giọng đọc chuẩn Hà Nội (Việt Bách)
+    """
+    sample_path = os.path.join(os.path.dirname(__file__), "hn-viet-bach.mp3")
+    if os.path.exists(sample_path):
+        return FileResponse(sample_path, media_type="audio/mpeg")
+    raise HTTPException(status_code=404, detail="File sample giọng đọc không tồn tại")
+
+@app.post("/api/v1/voice/stt")
+async def voice_stt(audio: UploadFile = File(...)):
+    """
+    Nhận diện giọng nói tiếng Việt từ file audio ghi âm của người dùng (Blaze STT v1.0)
+    """
+    audio_bytes = await audio.read()
+    result = blaze_service.speech_to_text(audio_bytes, filename=audio.filename or "speech.wav")
+    return result
+
+
+# ==========================================
+# API TRỢ LÝ HỘI THOẠI AI (VOICE ASSISTANT)
+# ==========================================
+class AssistantAskRequest(BaseModel):
+    question: str
+    current_step: Optional[str] = "Chặng 1: Đi thẳng 25m"
+    detected_objects: Optional[List[str]] = []
+    is_safe: Optional[bool] = True
+    closest_distance: Optional[float] = 2.5
+
+@app.post("/api/v1/assistant/ask")
+async def assistant_ask(request: AssistantAskRequest):
+    """
+    Trợ lý AI giao tiếp hội thoại trực tiếp với người khiếm thị.
+    Hiểu câu hỏi và kết hợp ngữ cảnh Camera Vision + GPS để đưa ra câu trả lời bằng giọng nói tiếng Việt.
+    """
+    q = request.question.strip().lower()
+    
+    if any(k in q for k in ["an toàn", "vật cản", "chướng ngại", "đi được không", "thông thoáng", "phía trước"]):
+        if not request.is_safe or (request.closest_distance is not None and request.closest_distance < 1.5):
+            obs_str = ", ".join(request.detected_objects) if request.detected_objects else "vật cản"
+            answer = f"Cảnh báo! Lối đi phía trước hiện có {obs_str} ở khoảng cách gần {request.closest_distance:.1f} mét. Bạn hãy dừng lại hoặc đi chậm chú ý bước chân."
+        else:
+            answer = "Lối đi phía trước hiện đang rất thông thoáng và an toàn. Bạn có thể tự tin tiếp tục bước đi thẳng."
+
+    elif any(k in q for k in ["người", "ai đó", "có ai"]):
+        has_person = any("person" in str(x).lower() or "người" in str(x).lower() for x in (request.detected_objects or []))
+        if has_person:
+            dist = f"cách khoảng {request.closest_distance:.1f} mét" if request.closest_distance else "ngay trước mặt"
+            answer = f"Camera phát hiện có người đang ở phía trước {dist}. Bạn hãy giữ khoảng cách an toàn."
+        else:
+            answer = "Hiện không phát hiện người nào trong phạm vi lối đi trước mặt bạn."
+
+    elif any(k in q for k in ["ở đâu", "vị trí", "điểm đến", "trạm xe buýt", "bến thành", "đến đâu"]):
+        answer = f"Bạn đang ở {request.current_step}. Tiếp tục bám theo vạch xúc giác màu vàng để tiến về Trạm Xe Buýt Bến Thành."
+
+    elif any(k in q for k in ["làm gì", "tiếp theo", "hướng dẫn", "rẽ", "đi đâu"]):
+        answer = f"Hiện tại bạn hãy {request.current_step}. Chú ý giữ thẳng hướng và quan sát biển báo AR."
+
+    elif any(k in q for k in ["chào", "xin chào", "bạn là ai", "tên gì"]):
+        answer = "Xin chào bạn! Tôi là Trợ lý Dẫn đường Thị giác AI. Tôi luôn đồng hành quan sát đường đi và cảnh báo an toàn cho bạn."
+
+    else:
+        answer = f"Trợ lý AI đã ghi nhận câu hỏi. Hiện tại bạn đang ở {request.current_step}. Lối đi đang được camera giám sát liên tục."
+
+    tts_res = blaze_service.text_to_speech(answer)
+    audio_url = tts_res.get("audio_url")
+
+    return {
+        "success": True,
+        "question": request.question,
+        "answer": answer,
+        "audio_url": audio_url
+    }
+
 
 # ==========================================
 # WEBSOCKET CHO REAL-TIME VIDEO TRACKING
@@ -190,11 +300,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     conf = det["confidence"]
                     box = det["bounding_box"]
                     
-                    # Bỏ qua các vật thể không thuộc đối tượng cản đường hoặc độ tin cậy thấp
-                    if cname not in OBSTACLE_CLASSES or conf < 0.38:
+                    # Ngưỡng tin cậy linh hoạt (hạ thấp cho điện thoại và đồ vật nhỏ để bắt nhạy hơn)
+                    min_conf = 0.22 if cname in ["cell phone", "bottle", "cup"] else 0.35
+                    if cname not in OBSTACLE_CLASSES or conf < min_conf:
                         continue
 
                     in_corridor = is_in_roi(box["x1"], box["y1"], box["x2"], box["y2"], img_width, img_height)
+                    # Nếu là điện thoại giơ trước mặt ở độ cao > 30% ảnh thì vẫn tính là vật cản trước mặt
+                    if not in_corridor and cname in ["cell phone", "bottle", "laptop"] and box["y2"] > img_height * 0.30:
+                        in_corridor = True
                     pos = determine_position(box["x1"], box["x2"], img_width)
                     is_person = (cname == "person")
 

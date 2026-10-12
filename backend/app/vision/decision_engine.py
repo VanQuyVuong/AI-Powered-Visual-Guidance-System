@@ -27,14 +27,14 @@ def is_in_roi(x1: int, y1: int, x2: int, y2: int, img_width: int, img_height: in
     obj_bottom_x = (x1 + x2) / 2.0
     obj_bottom_y = float(y2)
     
-    top_y = img_height * 0.45
+    top_y = img_height * 0.40
     # 1. Trục Y: Nếu vật thể lơ lửng trên cao / móc trên tường -> Bỏ qua, lối đi an toàn
     if obj_bottom_y < top_y:
         return False
         
     center_x = img_width * 0.5
-    top_width = img_width * 0.35
-    bot_width = img_width * 0.75
+    top_width = img_width * 0.40
+    bot_width = img_width * 0.80
     
     # Tỷ lệ tiến từ đỉnh hình thang xuống đáy (0.0 ở top_y, 1.0 ở đáy màn hình)
     progress = min(1.0, max(0.0, (obj_bottom_y - top_y) / (img_height - top_y)))
@@ -70,7 +70,7 @@ def generate_guidance(detections: list) -> dict:
     # Từ điển dịch tên tiếng Anh của YOLO sang tiếng Việt (COCO 80 classes)
     vocab = {
         "person": "người",
-        "car": "chiếc ô tô",
+        "car": "chiếc xe ô tô",
         "motorcycle": "chiếc xe máy",
         "bicycle": "chiếc xe đạp",
         "bus": "xe buýt",
@@ -105,7 +105,7 @@ def generate_guidance(detections: list) -> dict:
         if det.confidence < 0.45:
             continue
             
-        name_vn = vocab.get(det.class_name, "vật cản")
+        name_vn = vocab.get(det.class_name, det.class_name)
         if det.class_name == "person":
             has_person = True
             

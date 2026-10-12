@@ -557,6 +557,64 @@
             font-size: 0.78rem;
         }
 
+        /* TRỢ LÝ HỘI THOẠI GIỌNG NÓI AI (VOICE-FIRST) */
+        .assistant-card {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .voice-status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(0, 240, 255, 0.08);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            border-radius: 8px;
+            padding: 8px 12px;
+        }
+
+        .sound-wave {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            height: 18px;
+        }
+        .sound-wave span {
+            display: block;
+            width: 3px;
+            height: 6px;
+            background: var(--neon-cyan);
+            border-radius: 2px;
+            animation: waveBounce 1.2s ease-in-out infinite;
+        }
+        .sound-wave span:nth-child(2) { animation-delay: 0.15s; height: 12px; }
+        .sound-wave span:nth-child(3) { animation-delay: 0.3s; height: 16px; background: var(--neon-green); }
+        .sound-wave span:nth-child(4) { animation-delay: 0.45s; height: 10px; }
+        .sound-wave span:nth-child(5) { animation-delay: 0.6s; height: 14px; background: var(--neon-green); }
+
+        .sound-wave.idle span {
+            animation: none;
+            height: 4px;
+            opacity: 0.4;
+        }
+
+        @keyframes waveBounce {
+            0%, 100% { transform: scaleY(0.4); opacity: 0.6; }
+            50% { transform: scaleY(1.3); opacity: 1; }
+        }
+
+        .assistant-chat-box {
+            background: rgba(11, 15, 25, 0.85);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            border-radius: 10px;
+            padding: 12px;
+            min-height: 85px;
+            font-size: 0.88rem;
+            line-height: 1.5;
+            color: var(--text-main);
+        }
+
         /* VOICE & LOGS */
         .voice-card {
             display: flex;
@@ -738,6 +796,9 @@
                 <button class="btn-hud btn-secondary" id="btnTestVoice">
                     <span>🔊</span> Thử Giọng Blaze
                 </button>
+                <button class="btn-hud btn-secondary" id="btnSampleVoice" title="Phát mẫu giọng đọc chuẩn Hà Nội (Việt Bách)">
+                    <span>🎵</span> Mẫu Chuẩn Hà Nội
+                </button>
                 <button class="btn-hud btn-secondary" id="btnSimulatePerson">
                     <span>👤</span> Giả Lập Người (1.2m)
                 </button>
@@ -773,6 +834,49 @@
                         <strong id="stepTitle">Chặng 1: Đi thẳng 25 mét</strong>
                         <small id="stepSub">Giữ đúng vạch xúc giác màu vàng trên camera</small>
                     </div>
+                </div>
+            </div>
+
+            <!-- CARD GIAO TIẾP TRỰC TIẾP VỚI TRỢ LÝ AI (VOICE-FIRST) -->
+            <div class="glass-panel assistant-card">
+                <div class="card-header">
+                    <h2>🎙️ ĐÀM THOẠI GIỌNG NÓI VỚI AI</h2>
+                    <span id="badgeHandsFree" style="font-size: 0.72rem; color: var(--neon-green); background: rgba(0,255,136,0.12); padding: 3px 8px; border-radius: 12px; border: 1px solid rgba(0,255,136,0.3);">RẢNH TAY: BẬT</span>
+                </div>
+
+                <div class="voice-status-bar" id="voiceLiveBar">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="sound-wave" id="soundWaveAnim">
+                            <span></span><span></span><span></span><span></span><span></span>
+                        </div>
+                        <span id="voiceStatusBadge" style="color: var(--neon-green); font-weight: 700; font-size: 0.82rem;">ĐANG LẮNG NGHE BẠN... (HÃY NÓI)</span>
+                    </div>
+                    <button id="btnToggleHandsFree" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: var(--text-main); font-size: 0.72rem; padding: 3px 8px; border-radius: 6px; cursor: pointer;">Tắt Tự Động Nghe</button>
+                </div>
+
+                <div class="assistant-chat-box" id="assistantChatBox">
+                    <div id="userSpeechTranscript" style="color: var(--neon-cyan); font-size: 0.84rem; font-weight: 600; margin-bottom: 6px; min-height: 20px;">
+                        🗣️ Bạn: <i>(Hãy nói bất kỳ câu hỏi nào vào micro...)</i>
+                    </div>
+                    <div style="color: var(--neon-green); font-weight: 700; font-size: 0.8rem; margin-bottom: 3px; display: flex; align-items: center; gap: 6px;">
+                        <span>💬</span> TRỢ LÝ AI:
+                    </div>
+                    <div id="assistantResponseText" style="color: #fff; font-size: 0.9rem; line-height: 1.5;">
+                        "Tôi đang lắng nghe. Bạn hãy nói trực tiếp vào micro, tôi sẽ quan sát camera và trả lời bạn ngay."
+                    </div>
+                </div>
+
+                <div style="font-size: 0.72rem; color: var(--text-muted); display: flex; align-items: center; justify-content: space-between;">
+                    <span>💡 Phím tắt nói nhanh: <b>Spacebar</b> hoặc <b>Phím V</b></span>
+                    <span>🎤 Hỗ trợ micro tiếng Việt</span>
+                </div>
+
+                <div style="display: flex; flex-wrap: wrap; gap: 4px; opacity: 0.75; font-size: 0.72rem; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.05);">
+                    <span style="color: var(--text-muted);">Gợi ý câu lệnh mẫu:</span>
+                    <a href="javascript:void(0)" onclick="askAiAssistant('Phía trước có an toàn không?')" style="color: var(--neon-cyan); text-decoration: none;">"An toàn không?"</a> •
+                    <a href="javascript:void(0)" onclick="askAiAssistant('Tôi đang ở đâu?')" style="color: var(--neon-cyan); text-decoration: none;">"Tôi đang ở đâu?"</a> •
+                    <a href="javascript:void(0)" onclick="askAiAssistant('Có ai trước mặt không?')" style="color: var(--neon-cyan); text-decoration: none;">"Có ai trước mặt?"</a> •
+                    <a href="javascript:void(0)" onclick="askAiAssistant('Hướng dẫn tôi đi tiếp')" style="color: var(--neon-cyan); text-decoration: none;">"Đi tiếp thế nào?"</a>
                 </div>
             </div>
 
@@ -884,6 +988,13 @@
         }
 
         // ==========================================
+        // CẤU HÌNH API BASE ĐẢM BẢO HOẠT ĐỘNG TRÊN CẢ PORT 8000 VÀ FILE / LIVE SERVER
+        // ==========================================
+        const API_BASE = (window.location.protocol === 'file:' || window.location.port !== '8000')
+            ? "http://127.0.0.1:8000"
+            : "";
+
+        // ==========================================
         // HÀM ĐỌC GIỌNG NÓI TIẾNG VIỆT QUA FASTAPI PROXY BLAZE
         // ==========================================
         let lastSpeakTime = 0;
@@ -918,7 +1029,7 @@
 
             try {
                 // 1. GỌI QUA BACKEND FASTAPI PROXY (KÈM TOKEN BLAZE)
-                const res = await fetch("/api/v1/voice/tts", {
+                const res = await fetch(`${API_BASE}/api/v1/voice/tts`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     signal: ttsAbortController.signal,
@@ -942,19 +1053,23 @@
                             stopAllVoiceAndAudio();
                             return;
                         }
-                        audioPlayer.src = data.audio_url;
+                        const fullAudioUrl = data.audio_url.startsWith('http') ? data.audio_url : `${API_BASE}${data.audio_url}`;
+                        audioPlayer.src = fullAudioUrl;
                         await audioPlayer.play();
                         audioPlayer.onended = () => {
                             if (voiceStatus) voiceStatus.innerText = isCamActive ? "SẴN SÀNG" : "ĐÃ TẮT";
                         };
                         return;
+                    } else if (data && data.error) {
+                        addLog("alert-warn", `[BLAZE TTS LỖI] ${data.error}`);
                     }
                 }
             } catch (err) {
                 if (err.name === 'AbortError') {
                     return;
                 }
-                console.warn("Backend TTS stream error, using client fallback:", err);
+                console.warn("Backend TTS stream error:", err);
+                addLog("alert-warn", `[VOICE] Lỗi kết nối giọng đọc Blaze: ${err.message || 'Chưa sẵn sàng'}`);
             }
 
             // Kiểm tra lại trước khi kích hoạt bộ đọc fallback
@@ -963,16 +1078,23 @@
                 return;
             }
 
-            // 2. NẾU MẤT MẠNG HOẶC OFFLINE: Fallback bộ đọc tiếng Việt chuẩn
+            // 2. NẾU MẤT MẠNG HOẶC OFFLINE: Chỉ đọc nếu máy tính có sẵn giọng Tiếng Việt
+            // (Tuyệt đối không dùng giọng tiếng Anh Microsoft David để đọc bậy bạ)
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
                 const utter = new SpeechSynthesisUtterance(text);
                 utter.lang = 'vi-VN';
                 const voices = window.speechSynthesis.getVoices();
-                const viVoice = voices.find(v => v.lang.includes('vi') || v.lang.includes('VN'));
-                if (viVoice) utter.voice = viVoice;
-                utter.rate = 1.0;
-                window.speechSynthesis.speak(utter);
+                const viVoice = voices.find(v => (v.lang && (v.lang.includes('vi') || v.lang.includes('VN'))) || 
+                                                 (v.name && (v.name.includes('HoaiMy') || v.name.includes('NamMinh') || v.name.includes('Vietnamese'))));
+                if (viVoice) {
+                    utter.voice = viVoice;
+                    utter.rate = 1.0;
+                    window.speechSynthesis.speak(utter);
+                } else {
+                    console.warn("Máy tính chưa cài gói giọng đọc Tiếng Việt offline.");
+                    addLog("alert-warn", "[VOICE] Máy tính chưa có gói tiếng Việt (Vui lòng mở web tại http://localhost:8000 để dùng Blaze Cloud)");
+                }
             }
             if (voiceStatus) voiceStatus.innerText = isCamActive ? "SẴN SÀNG" : "ĐÃ TẮT";
         }
@@ -2019,6 +2141,23 @@
             speakBlaze("Xin chào! Tôi là trợ lý thị giác thông minh. Lối đi phía trước an toàn, hãy tiếp tục đi thẳng.", "TEST");
         });
 
+        // 5.1 Nút phát mẫu âm thanh chuẩn Hà Nội (Việt Bách)
+        const btnSample = document.getElementById('btnSampleVoice');
+        if (btnSample) {
+            btnSample.addEventListener('click', () => {
+                const voiceStatus = document.getElementById("voiceStatusText");
+                if (voiceStatus) voiceStatus.innerText = "ĐANG ĐỌC (MẪU HN)...";
+                addLog("alert-info", "[MẪU GIỌNG HÀ NỘI] Đang phát file âm thanh chuẩn Hà Nội (Việt Bách)...");
+                audioPlayer.src = `${API_BASE}/api/v1/voice/sample`;
+                audioPlayer.play().catch(e => {
+                    console.warn("Không phát được file sample:", e);
+                });
+                audioPlayer.onended = () => {
+                    if (voiceStatus) voiceStatus.innerText = isCamActive ? "SẴN SÀNG" : "ĐÃ TẮT";
+                };
+            });
+        }
+
         // 6. Nút giả lập người (1.2m)
         document.getElementById('btnSimulatePerson').addEventListener('click', () => {
             simulatedPersonActive = !simulatedPersonActive;
@@ -2058,6 +2197,238 @@
                 btn.style.color = "var(--text-main)";
                 btn.innerHTML = "<span>📦</span> Giả Lập Vật Cản (0.8m)";
                 addLog("alert-info", "[AN TOÀN] Vùng quan tâm đã thông thoáng.");
+            }
+        });
+
+        // ==========================================
+        // 8. HỆ THỐNG ĐÀM THOẠI GIỌNG NÓI RẢNH TAY (HANDS-FREE VOICE ASSISTANT)
+        // ==========================================
+        let isHandsFreeActive = true;
+        let isAiSpeaking = false;
+        let recognizer = null;
+        let audioPlayerUnlocked = false;
+
+        // Mở khóa âm thanh trình duyệt ngay khi người dùng tương tác lần đầu
+        document.addEventListener('click', () => {
+            if (audioPlayer && !audioPlayerUnlocked) {
+                audioPlayer.play().then(() => {
+                    audioPlayer.pause();
+                    audioPlayerUnlocked = true;
+                }).catch(() => {});
+            }
+        }, { once: true });
+
+        function updateVoiceUiState(state, text = '') {
+            const badge = document.getElementById('voiceStatusBadge');
+            const wave = document.getElementById('soundWaveAnim');
+            if (!badge || !wave) return;
+
+            if (state === 'listening') {
+                badge.innerText = '🟢 ĐANG LẮNG NGHE BẠN... (HÃY NÓI)';
+                badge.style.color = 'var(--neon-green)';
+                wave.classList.remove('idle');
+            } else if (state === 'thinking') {
+                badge.innerText = '🟡 AI ĐANG SUY NGHĨ & PHÂN TÍCH...';
+                badge.style.color = 'var(--neon-amber)';
+                wave.classList.add('idle');
+            } else if (state === 'speaking') {
+                badge.innerText = '🔵 AI ĐANG TRẢ LỜI BẰNG GIỌNG NÓI...';
+                badge.style.color = 'var(--neon-cyan)';
+                wave.classList.remove('idle');
+            } else if (state === 'idle') {
+                badge.innerText = text || '⏸️ TẠM DỪNG LẮNG NGHE';
+                badge.style.color = 'var(--text-muted)';
+                wave.classList.add('idle');
+            }
+        }
+
+        async function askAiAssistant(question) {
+            if (!question || !question.trim()) return;
+            const q = question.trim();
+
+            const userTextDisplay = document.getElementById("userSpeechTranscript");
+            if (userTextDisplay) {
+                userTextDisplay.innerHTML = `🗣️ Bạn: <b style="color:#fff;">"${q}"</b>`;
+            }
+
+            const respBox = document.getElementById("assistantResponseText");
+            if (respBox) respBox.innerText = `Đang phân tích camera & trả lời: "${q}"...`;
+            addLog("alert-info", `[HỎI AI] "${q}"`);
+            updateVoiceUiState('thinking');
+
+            const curLeg = simulatedRoute[currentStepIdx] || {};
+            const curStepTitle = `${curLeg.title || 'Đang dẫn đường'} (${curLeg.currentDist || 0}m)`;
+
+            const detectedNames = backendDetections.map(d => getVietnameseName(d.class_name || d.name));
+            if (simulatedPersonActive) detectedNames.push("người");
+            if (simulatedObstacleActive) detectedNames.push("vật cản");
+
+            try {
+                const res = await fetch(`${API_BASE}/api/v1/assistant/ask`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question: q,
+                        current_step: curStepTitle,
+                        detected_objects: detectedNames,
+                        is_safe: !simulatedPersonActive && !simulatedObstacleActive,
+                        closest_distance: simulatedPersonActive ? 1.2 : (simulatedObstacleActive ? 0.8 : 3.0)
+                    })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.answer) {
+                        if (respBox) respBox.innerText = `"${data.answer}"`;
+                        addLog("alert-info", `[AI TRẢ LỜI] "${data.answer}"`);
+
+                        if (data.audio_url) {
+                            isAiSpeaking = true;
+                            updateVoiceUiState('speaking');
+                            if (recognizer) {
+                                try { recognizer.stop(); } catch(e) {}
+                            }
+
+                            const fullAudioUrl = data.audio_url.startsWith('http') ? data.audio_url : `${API_BASE}${data.audio_url}`;
+                            audioPlayer.src = fullAudioUrl;
+                            audioPlayer.onended = () => {
+                                isAiSpeaking = false;
+                                if (isHandsFreeActive) {
+                                    startVoiceListening();
+                                } else {
+                                    updateVoiceUiState('idle');
+                                }
+                            };
+                            await audioPlayer.play().catch(e => {
+                                console.warn("Lỗi phát audio assistant:", e);
+                                isAiSpeaking = false;
+                                if (isHandsFreeActive) startVoiceListening();
+                            });
+                            return;
+                        }
+                    }
+                }
+            } catch (err) {
+                if (respBox) respBox.innerText = "Lỗi kết nối Trợ lý AI.";
+                console.error("Lỗi askAiAssistant:", err);
+            }
+
+            isAiSpeaking = false;
+            if (isHandsFreeActive) startVoiceListening();
+        }
+
+        function startVoiceListening() {
+            if (isAiSpeaking || !isHandsFreeActive) return;
+            if (!recognizer) initSpeechRecognition();
+            try {
+                recognizer.start();
+                updateVoiceUiState('listening');
+            } catch (e) {
+                // Recognition already started
+            }
+        }
+
+        function initSpeechRecognition() {
+            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRec) {
+                updateVoiceUiState('idle', '⚠️ Trình duyệt chưa hỗ trợ Web Speech');
+                return;
+            }
+
+            recognizer = new SpeechRec();
+            recognizer.lang = 'vi-VN';
+            recognizer.continuous = false;
+            recognizer.interimResults = true;
+
+            recognizer.onstart = () => {
+                updateVoiceUiState('listening');
+            };
+
+            recognizer.onresult = (event) => {
+                if (isAiSpeaking) return;
+
+                let finalTranscript = '';
+                let interim = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interim += event.results[i][0].transcript;
+                    }
+                }
+
+                const userTextDisplay = document.getElementById("userSpeechTranscript");
+                if (interim && userTextDisplay) {
+                    userTextDisplay.innerHTML = `🗣️ Bạn đang nói: <span style="color:#fff;">"${interim}"</span>`;
+                }
+
+                if (finalTranscript && finalTranscript.trim()) {
+                    const textToSend = finalTranscript.trim();
+                    askAiAssistant(textToSend);
+                }
+            };
+
+            recognizer.onerror = (e) => {
+                if (e.error !== 'no-speech') {
+                    console.warn("SpeechRec error:", e.error);
+                }
+            };
+
+            recognizer.onend = () => {
+                // Tự động mở lại để lắng nghe liên tục khi rảnh tay
+                if (isHandsFreeActive && !isAiSpeaking) {
+                    setTimeout(() => {
+                        if (isHandsFreeActive && !isAiSpeaking) {
+                            try { recognizer.start(); } catch(e) {}
+                        }
+                    }, 400);
+                } else if (!isHandsFreeActive) {
+                    updateVoiceUiState('idle', '⏸️ Rảnh tay đã tắt');
+                }
+            };
+        }
+
+        // Khởi động nhận diện giọng nói khi vào trang
+        setTimeout(() => {
+            initSpeechRecognition();
+            startVoiceListening();
+        }, 800);
+
+        // Bật/tắt chế độ rảnh tay
+        const btnToggleHands = document.getElementById('btnToggleHandsFree');
+        if (btnToggleHands) {
+            btnToggleHands.addEventListener('click', () => {
+                isHandsFreeActive = !isHandsFreeActive;
+                const badge = document.getElementById('badgeHandsFree');
+                if (isHandsFreeActive) {
+                    btnToggleHands.innerText = 'Tắt Tự Động Nghe';
+                    if (badge) {
+                        badge.innerText = 'RẢNH TAY: BẬT';
+                        badge.style.color = 'var(--neon-green)';
+                        badge.style.borderColor = 'rgba(0,255,136,0.3)';
+                    }
+                    startVoiceListening();
+                } else {
+                    btnToggleHands.innerText = 'Bật Tự Động Nghe';
+                    if (badge) {
+                        badge.innerText = 'RẢNH TAY: TẮT';
+                        badge.style.color = 'var(--text-muted)';
+                        badge.style.borderColor = 'rgba(255,255,255,0.2)';
+                    }
+                    if (recognizer) {
+                        try { recognizer.stop(); } catch(e) {}
+                    }
+                    updateVoiceUiState('idle', '⏸️ Rảnh tay đã tắt');
+                }
+            });
+        }
+
+        // Phím tắt Space hoặc V để nói nhanh
+        window.addEventListener('keydown', (e) => {
+            if ((e.code === 'KeyV' || e.code === 'Space') && !e.repeat && document.activeElement.tagName !== 'INPUT') {
+                if (e.code === 'Space') e.preventDefault();
+                startVoiceListening();
             }
         });
 

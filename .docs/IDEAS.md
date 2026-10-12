@@ -29,3 +29,10 @@ Không cần quan tâm ý tưởng đó có khả thi hay không, cứ ném vào
 - **Mô tả:** Hệ thống không chỉ dùng Google Maps để chỉ đường chung chung (Vĩ mô) mà phải kết hợp với Camera AI (Vi mô). GPS cung cấp kịch bản (VD: "Còn 15m nữa rẽ phải"), sau đó AI Camera sẽ tự động tìm kiếm góc cua, vạch kẻ đường hoặc gạch dẫn đường để chỉ cho người khiếm thị bước đi chính xác (VD: "Đến ngã rẽ rồi, hãy cua từ từ sang phải theo đường gạch").
 - **Lý do:** Người khiếm thị không thể biết chính xác 15m là bao xa và lề đường nằm ở đâu nếu chỉ nghe theo Google Maps. Sự kết hợp này biến thiết bị thành một "Chú chó dẫn đường điện tử" thực thụ.
 - **Cách làm:** Team Flutter sẽ code API Google Maps để lấy lộ trình (Directions). Sau đó gửi trạng thái lộ trình (VD: "Sắp rẽ") sang cho Backend Python. Backend Python sẽ kích hoạt chế độ "Tìm góc cua/vạch kẻ đường" của OpenCV/YOLO để đưa ra cảnh báo chính xác tới từng bước chân.
+
+## 6. Thị Giác Không Gian 3D & Khảo Sát Toàn Cảnh (Hybrid 2-Tier Vision: YOLO11 + SpatialLM 3D-LLM)
+- **Mô tả:** Kết hợp 2 tầng thị giác với 2 tốc độ khác nhau:
+  - *Tầng 1 (Realtime Safety - YOLO11):* Chạy mỗi 1.5s nhận diện vật cản 2D nhanh tức thì (15-30ms) để bảo vệ từng bước đi.
+  - *Tầng 2 (Deep Spatial Understanding - SpatialLM):* Chế độ khảo sát không gian 3 chiều khi người dùng bước vào phòng kín hoặc ra lệnh giọng nói "Mô tả không gian xung quanh". AI dựng Point Cloud và dùng 3D-LLM (SpatialLM) để xác định vị trí cửa ra vào, cửa sổ, tường, vật thể theo tọa độ 3 chiều và khoảng cách mét thực tế.
+- **Lý do:** YOLO 2D chỉ biết vật thể nằm ở góc ảnh nào chứ không biết cấu trúc phòng 3D hay khoảng cách thực (mét). SpatialLM giúp người khiếm thị hình dung hoàn chỉnh bản đồ căn phòng trong đầu.
+- **Cách làm:** Tích hợp mô hình SpatialLM (NeurIPS 2025) ở thư mục `1/SpatialLM/`. Tạo API endpoint riêng `/api/v1/spatial/inspect-room` để nhận Point Cloud (từ video SLAM hoặc cảm biến ToF/LiDAR) và sinh câu mô tả bố cục phòng dạng văn bản/tiếng Việt.
