@@ -2,7 +2,14 @@ import os
 import requests
 from typing import Dict, Any, Optional
 
-BLAZE_API_KEY = os.getenv("BLAZE_API_KEY", "68f5578def0d2c60d7cd49e9743f0c27ede87304")
+try:
+    from dotenv import load_dotenv
+    _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    load_dotenv(os.path.join(_project_root, ".env"))
+except ImportError:
+    pass
+
+BLAZE_API_KEY = os.getenv("BLAZE_API_KEY", "")
 BLAZE_TTS_URL = "https://api.blaze.vn/v1/tts"
 BLAZE_STT_URL = "https://api.blaze.vn/v1/stt/execute"
 
@@ -13,6 +20,8 @@ class BlazeService:
     """
     def __init__(self, api_key: str = BLAZE_API_KEY):
         self.api_key = api_key
+        if not self.api_key:
+            print("⚠️ BLAZE_API_KEY chưa được set. Tạo file .env với BLAZE_API_KEY=... (xem .env.example). TTS sẽ dùng Google fallback.")
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"

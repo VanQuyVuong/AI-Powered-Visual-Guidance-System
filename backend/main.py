@@ -150,8 +150,8 @@ async def inspect_room_api(
     prompt: Optional[str] = "Khảo sát không gian phòng và định vị vật thể"
 ):
     """
-    API Khảo sát không gian 3 chiều (Spatial Inspection) dành cho Thiết bị IoT / Kính thông minh.
-    Nhận diện kết cấu phòng (cửa, cửa sổ, bàn ghế) kèm tọa độ 3D và khoảng cách mét thực tế.
+    Prototype khảo sát phòng 3D.
+    Hiện trả stub (SpatialLM chưa inference). Web demo đọc trường vietnamese_description.
     """
     img_bytes = None
     if image and image.content_type and image.content_type.startswith("image/"):
@@ -226,17 +226,28 @@ async def assistant_ask(request: AssistantAskRequest):
         else:
             answer = "Hiện không phát hiện người nào trong phạm vi lối đi trước mặt bạn."
 
+    elif any(k in q for k in ["về nhà", "đường về", "dẫn tôi về", "chỉ đường về"]):
+        answer = (
+            "Chức năng dẫn đường về nhà chưa kết nối bản đồ và model hội thoại của công ty. "
+            "Hiện tôi chỉ cảnh báo vật cản bằng camera YOLO. "
+            "Bạn có thể hỏi: phía trước có an toàn không, có ai trước mặt không."
+        )
+
     elif any(k in q for k in ["ở đâu", "vị trí", "điểm đến", "trạm xe buýt", "bến thành", "đến đâu"]):
-        answer = f"Bạn đang ở {request.current_step}. Tiếp tục bám theo vạch xúc giác màu vàng để tiến về Trạm Xe Buýt Bến Thành."
+        answer = f"Bạn đang ở {request.current_step}. Đây là lộ trình mô phỏng trên web demo, chưa phải GPS dẫn đường thật về nhà."
 
     elif any(k in q for k in ["làm gì", "tiếp theo", "hướng dẫn", "rẽ", "đi đâu"]):
-        answer = f"Hiện tại bạn hãy {request.current_step}. Chú ý giữ thẳng hướng và quan sát biển báo AR."
+        answer = f"Hiện tại bạn hãy {request.current_step}. Chú ý giữ thẳng hướng. Dẫn đường thật (maps + LLM công ty) chưa được gắn."
 
     elif any(k in q for k in ["chào", "xin chào", "bạn là ai", "tên gì"]):
-        answer = "Xin chào bạn! Tôi là Trợ lý Dẫn đường Thị giác AI. Tôi luôn đồng hành quan sát đường đi và cảnh báo an toàn cho bạn."
+        answer = "Xin chào bạn! Tôi là trợ lý thị giác. Tôi dùng YOLO để cảnh báo vật cản. Hội thoại tự do với model công ty chưa được kết nối."
 
     else:
-        answer = f"Trợ lý AI đã ghi nhận câu hỏi. Hiện tại bạn đang ở {request.current_step}. Lối đi đang được camera giám sát liên tục."
+        answer = (
+            f"Tôi chưa dùng model hội thoại của công ty nên chưa trả lời tự do được câu đó. "
+            f"Bạn thử hỏi: an toàn không, có người không, hoặc bật camera để tôi quan sát lối đi. "
+            f"Ngữ cảnh demo: {request.current_step}."
+        )
 
     tts_res = blaze_service.text_to_speech(answer)
     audio_url = tts_res.get("audio_url")

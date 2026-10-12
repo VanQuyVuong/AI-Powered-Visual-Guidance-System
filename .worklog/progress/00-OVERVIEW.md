@@ -30,4 +30,4 @@ Tài liệu này dùng để theo dõi tiến độ công việc dựa trên `TE
 
 ## 🔮 Nâng cấp & Tính năng Mở rộng (Post-MVP & Extensions)
 - [x] **YOLO Upgrade:** Nâng cấp detector từ YOLOv8n lên **YOLO11n** (bản mới nhất từ Ultralytics, nhẹ hơn, độ chính xác cao hơn).
-- [x] **SpatialLM 3D Vision:** Tích hợp mô hình 3D Multimodal LLM cho chế độ khảo sát không gian phòng (Ý tưởng #6 trong `.docs/IDEAS.md`).
+- [ ] **SpatialLM 3D Vision:** Mới có UI demo + API stub `/api/v1/spatial/inspect-room`. Model SpatialLM chưa load/inference (repo tham khảo ở `1/SpatialLM/` nếu đã clone). YOLO11 vẫn là tầng thị giác realtime.
