@@ -60,59 +60,128 @@ def estimate_distance(y1: int, y2: int, img_height: int) -> str:
         return "ở xa"
 
 
+# Từ điển dịch tên tiếng Anh của YOLO sang tiếng Việt (COCO 80 classes + vật dụng quen thuộc)
+VOCAB = {
+    "person": "người",
+    "bicycle": "chiếc xe đạp",
+    "car": "chiếc xe ô tô",
+    "motorcycle": "chiếc xe máy",
+    "airplane": "máy bay",
+    "bus": "xe buýt",
+    "train": "tàu hỏa",
+    "truck": "xe tải",
+    "boat": "thuyền",
+    "traffic light": "đèn tín hiệu",
+    "fire hydrant": "trụ nước chữa cháy",
+    "stop sign": "biển báo dừng",
+    "parking meter": "đồng hồ đỗ xe",
+    "bench": "ghế dài",
+    "bird": "con chim",
+    "cat": "con mèo",
+    "dog": "con chó",
+    "horse": "con ngựa",
+    "sheep": "con cừu",
+    "cow": "con bò",
+    "elephant": "con voi",
+    "bear": "con gấu",
+    "zebra": "ngựa vằn",
+    "giraffe": "hươu cao cổ",
+    "backpack": "ba lô",
+    "handbag": "túi xách",
+    "tie": "cà vạt",
+    "suitcase": "vali",
+    "frisbee": "đĩa bay",
+    "skis": "ván trượt tuyết",
+    "snowboard": "ván trượt",
+    "sports ball": "quả bóng",
+    "kite": "con diều",
+    "baseball bat": "gậy bóng chày",
+    "baseball glove": "găng tay bóng chày",
+    "skateboard": "ván trượt",
+    "surfboard": "ván lướt sóng",
+    "tennis racket": "vợt tennis",
+    "bottle": "chai nước",
+    "wine glass": "ly rượu",
+    "cup": "cốc nước",
+    "fork": "cái nĩa",
+    "knife": "con dao",
+    "spoon": "cái thìa",
+    "bowl": "cái bát",
+    "banana": "quả chuối",
+    "apple": "quả táo",
+    "sandwich": "bánh mì kẹp",
+    "orange": "quả cam",
+    "broccoli": "bông cải xanh",
+    "carrot": "củ cà rốt",
+    "hot dog": "bánh mì kẹp xúc xích",
+    "pizza": "bánh pizza",
+    "donut": "bánh donut",
+    "cake": "bánh ngọt",
+    "chair": "chiếc ghế",
+    "couch": "ghế sofa",
+    "potted plant": "chậu cây",
+    "bed": "giường ngủ",
+    "dining table": "bàn ăn",
+    "table": "chiếc bàn",
+    "toilet": "bồn cầu",
+    "tv": "màn hình tivi",
+    "laptop": "máy tính xách tay",
+    "mouse": "chuột máy tính",
+    "remote": "điều khiển",
+    "keyboard": "bàn phím",
+    "cell phone": "điện thoại",
+    "microwave": "lò vi sóng",
+    "oven": "lò nướng",
+    "toaster": "máy nướng bánh",
+    "sink": "bồn rửa",
+    "refrigerator": "tủ lạnh",
+    "book": "cuốn sách",
+    "clock": "đồng hồ",
+    "vase": "bình hoa",
+    "scissors": "cái kéo",
+    "teddy bear": "gấu bông",
+    "hair drier": "máy sấy tóc",
+    "toothbrush": "bàn chải",
+    "door": "cửa ra vào",
+    "stair": "bậc thang",
+    "stairs": "cầu thang"
+}
+
+def get_vietnamese_name(class_name: str) -> str:
+    """Trả về tên tiếng Việt của đối tượng, nếu không có thì trả về class_name gốc."""
+    if not class_name:
+        return "vật cản"
+    return VOCAB.get(str(class_name).lower().strip(), str(class_name))
+
+
 def generate_guidance(detections: list) -> dict:
     """
-    Nhận danh sách các vật thể, lọc ra vật thể quan trọng và ghép thành câu tiếng Việt.
+    Nhận danh sách các vật thể, lọc ra vật thể quan trọng và ghép thành câu tiếng Việt tự nhiên.
     """
     if not detections:
         return None
         
-    # Từ điển dịch tên tiếng Anh của YOLO sang tiếng Việt (COCO 80 classes)
-    vocab = {
-        "person": "người",
-        "car": "chiếc xe ô tô",
-        "motorcycle": "chiếc xe máy",
-        "bicycle": "chiếc xe đạp",
-        "bus": "xe buýt",
-        "truck": "xe tải",
-        "chair": "ghế",
-        "couch": "ghế sofa",
-        "table": "bàn",
-        "dining table": "bàn",
-        "bed": "giường",
-        "tv": "màn hình",
-        "laptop": "máy tính",
-        "bottle": "chai nước",
-        "cup": "cốc nước",
-        "backpack": "ba lô",
-        "handbag": "túi xách",
-        "suitcase": "vali",
-        "cell phone": "điện thoại",
-        "potted plant": "chậu cây",
-        "dog": "con chó",
-        "cat": "con mèo",
-        "traffic light": "đèn tín hiệu",
-        "stop sign": "biển báo",
-        "fire hydrant": "trụ nước",
-        "door": "cửa",
-        "stair": "bậc thang",
-        "stairs": "cầu thang"
-    }
-    
     parts = []
     has_person = False
     for det in detections:
-        if det.confidence < 0.45:
+        conf = getattr(det, "confidence", 0.0)
+        # Bỏ qua các nhận diện có độ tin cậy thấp (< 0.45)
+        if conf < 0.45:
             continue
             
-        name_vn = vocab.get(det.class_name, det.class_name)
-        if det.class_name == "person":
+        cname = getattr(det, "class_name", "")
+        # Nếu chưa có trong vocab dùng tên gốc (đảm bảo test test_unknown_class_uses_english_name pass)
+        name_vn = VOCAB.get(cname.lower().strip(), cname) if cname else "vật cản"
+        if cname == "person":
             has_person = True
             
-        # Ước lượng khoảng cách
+        # Ước lượng khoảng cách từ bounding box
         dist_text = ""
-        if hasattr(det, 'bounding_box') and det.bounding_box:
-            h = det.bounding_box.y2 - det.bounding_box.y1
+        bbox = getattr(det, 'bounding_box', None)
+        if bbox:
+            y1 = getattr(bbox, 'y1', 0)
+            y2 = getattr(bbox, 'y2', 0)
+            h = y2 - y1
             if h > 300:
                 dist_text = " khoảng cách rất gần"
             elif h > 150:
@@ -120,9 +189,10 @@ def generate_guidance(detections: list) -> dict:
             else:
                 dist_text = " khoảng 3 mét"
         
-        if det.position == "left":
+        pos = getattr(det, "position", "center")
+        if pos == "left":
             parts.append(f"bên trái có {name_vn}{dist_text}")
-        elif det.position == "right":
+        elif pos == "right":
             parts.append(f"bên phải có {name_vn}{dist_text}")
         else:
             parts.append(f"ngay phía trước có {name_vn}{dist_text}")
@@ -137,3 +207,4 @@ def generate_guidance(detections: list) -> dict:
         "has_person": has_person,
         "priority": "HIGH" if "phía trước" in text.lower() or has_person else "MEDIUM"
     }
+

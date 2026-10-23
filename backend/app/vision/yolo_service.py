@@ -1,17 +1,50 @@
+import os
 import cv2
 import numpy as np
 from ultralytics import YOLO
 
-# Tải model ở ngoài hàm để nó chỉ load 1 lần khi bật server, không load lại mỗi khi có request
-print("Đang khởi tạo model YOLO11 (bản mới nhất)...")
-model = YOLO('yolo11n.pt')
+# Ưu tiên load model YOLO26n (bản mới nhất 2026), tự động fallback yolo11n nếu cần
+DEFAULT_MODEL = "yolo26n.pt"
+model_file = os.getenv("YOLO_MODEL", DEFAULT_MODEL)
+
+# Tìm đường dẫn file model trong thư mục backend hoặc thư mục gốc dự án
+if not os.path.isabs(model_file):
+    candidates = [
+        model_file,
+        os.path.join(os.path.dirname(__file__), "..", "..", model_file),
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", model_file),
+        "yolo26n.pt",
+        "yolo11n.pt"
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            model_file = c
+            break
+
+print(f"Đang khởi tạo model YOLO ({os.path.basename(model_file)} - bản mới nhất)...")
+model = YOLO(model_file)
+
+# Tự động dùng GPU (CUDA) nếu có -> nhanh gấp nhiều lần CPU
+try:
+    import torch
+    DEVICE = 0 if torch.cuda.is_available() else "cpu"
+except Exception:
+    DEVICE = "cpu"
+USE_HALF = (DEVICE != "cpu")
+print(f"YOLO chạy trên thiết bị: {DEVICE}")
+
+# Khởi động nóng (warm-up) để lần gọi đầu tiên không bị chậm vài giây
+try:
+    extra_kw = {"half": True} if USE_HALF else {}
+    model(np.zeros((480, 640, 3), dtype=np.uint8), verbose=False, device=DEVICE, **extra_kw)
+except Exception as _e:
+    print(f"[WARN] Warm-up YOLO lỗi: {_e}")
 
 def run_inference(image_bytes: bytes):
     """
     Chạy nhận diện trên ảnh dạng byte (vì ảnh gửi qua API web).
     Trả về danh sách object và chiều rộng ảnh (để tính position).
     """
-    # Chuyển đổi dữ liệu byte thành ma trận ảnh để OpenCV và YOLO đọc được
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     
@@ -20,8 +53,8 @@ def run_inference(image_bytes: bytes):
         
     height, width, _ = img.shape
     
-    # Chạy YOLO
-    results = model(img)
+    # Chạy YOLO inference
+    results = model(img, verbose=False, device=DEVICE, imgsz=640, **extra_kw)
     
     detections = []
     for result in results:
@@ -48,8 +81,8 @@ def run_inference(image_bytes: bytes):
 
 def run_tracking(image_bytes: bytes):
     """
-    Chạy nhận diện Bám đuổi (Tracking) trên 1 frame ảnh.
-    Giống run_inference nhưng dùng model.track thay vì model() để nhớ ID vật thể.
+    Chạy nhận diện Bám đuổi (Tracking) trên 1 frame ảnh thời gian thực.
+    Sử dụng ByteTrack để duy trì ID đối tượng liên tục giữa các khung hình.
     """
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -59,22 +92,21 @@ def run_tracking(image_bytes: bytes):
         
     height, width, _ = img.shape
     
-    # Chạy YOLO Tracking với ngưỡng tin cậy conf=0.40 để loại bỏ bóng mờ/nhiễu
-    results = model.track(img, persist=True, tracker="bytetrack.yaml", verbose=False, conf=0.40)
+    # Chạy YOLO Tracking với ngưỡng tin cậy conf=0.35
+    results = model.track(img, persist=True, tracker="bytetrack.yaml", verbose=False, conf=0.35,
+                          device=DEVICE, imgsz=640, **extra_kw)
     
     detections = []
-    # Ở đây chúng ta có thể mở rộng lấy thêm ID của vật thể (result.boxes.id)
-    # Nhưng hiện tại để nhanh gọn ta vẫn dùng chung Schema cũ
     for result in results:
         boxes = result.boxes
         for i in range(len(boxes)):
             class_id = int(boxes.cls[i].item())
             class_name = model.names[class_id]
             confidence = float(boxes.conf[i].item())
-            x1, y1, x2, y2 = boxes.xyxy[i].tolist()
+            x1, y1, x2, y2 = box_coords = boxes.xyxy[i].tolist()
             
-            # Nếu vật thể có ID (Tracking thành công)
-            obj_id = int(boxes.id[i].item()) if boxes.id is not None else None
+            # Lấy tracking ID nếu có
+            obj_id = int(boxes.id[i].item()) if (boxes.id is not None and len(boxes.id) > i) else None
             
             detections.append({
                 "id": obj_id,
@@ -88,27 +120,5 @@ def run_tracking(image_bytes: bytes):
                 }
             })
 
-    # TỰ ĐỘNG PHÁT HIỆN VẬT CẢN ÁP SÁT CAMERA (< 0.5m) NẾU YOLO KHÔNG KỊP GÁN NHÃN
-    # (Ví dụ: điện thoại, lòng bàn tay, hộp giấy đưa sát vào ống kính webcam)
-    if len(detections) == 0:
-        try:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            center_crop = gray[int(height * 0.35):int(height * 0.95), int(width * 0.25):int(width * 0.75)]
-            edges = cv2.Canny(center_crop, 40, 120)
-            edge_density = float(np.sum(edges > 0)) / float(center_crop.size)
-            if edge_density > 0.045:
-                detections.append({
-                    "id": None,
-                    "class_name": "cell phone",
-                    "confidence": 0.85,
-                    "bounding_box": {
-                        "x1": int(width * 0.32),
-                        "y1": int(height * 0.38),
-                        "x2": int(width * 0.70),
-                        "y2": int(height * 0.92)
-                    }
-                })
-        except Exception:
-            pass
-            
     return detections, width, height
+
