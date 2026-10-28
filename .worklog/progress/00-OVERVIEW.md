@@ -25,3 +25,9 @@ Tài liệu này dùng để theo dõi tiến độ công việc dựa trên `TE
 
 ### Sprint 4: Tích hợp End-to-End
 - [ ] **End-to-End:** `Camera App → FastAPI → YOLO → Decision Engine → Voice API → Phát âm thanh trên App`.
+
+---
+
+## 🔮 Nâng cấp & Tính năng Mở rộng (Post-MVP & Extensions)
+- [x] **YOLO Upgrade:** Nâng cấp detector từ YOLOv8n lên **YOLO11n** (bản mới nhất từ Ultralytics, nhẹ hơn, độ chính xác cao hơn).
+- [ ] **SpatialLM 3D Vision:** Mới có UI demo + API stub `/api/v1/spatial/inspect-room`. Model SpatialLM chưa load/inference (repo tham khảo ở `1/SpatialLM/` nếu đã clone). YOLO11 vẫn là tầng thị giác realtime.

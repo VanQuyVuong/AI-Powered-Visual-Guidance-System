@@ -7,3 +7,7 @@ pydantic
 websockets
 pytest
 onnxruntime
+requests
+python-dotenv
+# OCR (tùy chọn): pip install easyocr
+# SpatialLM thật chưa gắn; khi tích hợp sẽ cần thêm torch/transformers theo README của repo 1/SpatialLM
