@@ -7,8 +7,14 @@ def detect_tactile_paving(image_bytes: bytes) -> bool:
     Dựa trên đặc trưng màu VÀNG đặc trưng ở làn bước chân trung tâm (walking corridor).
     Trả về True nếu phát hiện người dùng đang thực sự đi trên dải gạch nổi màu vàng.
     """
-    # 1. Giải mã ảnh từ bytes
+    # 1. Kiểm tra tính hợp lệ và giải mã ảnh từ bytes
+    if not image_bytes:
+        return False
+
     nparr = np.frombuffer(image_bytes, np.uint8)
+    if nparr.size == 0:
+        return False
+
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     
     if img is None:

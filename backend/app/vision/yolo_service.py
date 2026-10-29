@@ -58,7 +58,13 @@ def run_inference(image_bytes: bytes):
     Chạy nhận diện trên ảnh dạng byte (vì ảnh gửi qua API web).
     Trả về danh sách object và chiều rộng ảnh (để tính position).
     """
+    if not image_bytes:
+        raise ValueError("Không thể đọc được ảnh (INVALID_IMAGE)")
+
     nparr = np.frombuffer(image_bytes, np.uint8)
+    if nparr.size == 0:
+        raise ValueError("Không thể đọc được ảnh (INVALID_IMAGE)")
+
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     
     if img is None:
@@ -97,7 +103,13 @@ def run_tracking(image_bytes: bytes):
     Chạy nhận diện Bám đuổi (Tracking) trên 1 frame ảnh thời gian thực.
     Sử dụng ByteTrack để duy trì ID đối tượng liên tục giữa các khung hình.
     """
+    if not image_bytes:
+        raise ValueError("Không thể đọc được ảnh (INVALID_IMAGE)")
+
     nparr = np.frombuffer(image_bytes, np.uint8)
+    if nparr.size == 0:
+        raise ValueError("Không thể đọc được ảnh (INVALID_IMAGE)")
+
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     
     if img is None:
