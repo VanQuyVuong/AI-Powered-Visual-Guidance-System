@@ -25,3 +25,8 @@ test_images/
 1/
 SpatialLM/
 research*/
+
+# Ket qua test anh/video (nang)
+test_media/output/
+test_media/input/*
+!test_media/input/README.md
