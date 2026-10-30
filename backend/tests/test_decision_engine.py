@@ -173,8 +173,8 @@ class TestIsInROI:
 
     def test_object_floating_top(self):
         """Vật thể lơ lửng nửa trên (y2 < 40% ảnh) → NGOÀI ROI."""
-        # Ảnh 640x480. 40% chiều cao = 192. y2=150 < 192 → Bỏ qua
-        assert is_in_roi(250, 50, 390, 150, 640, 480) is False
+        # Ảnh 640x480. ngưỡng 22% = 105. y2=90 < 105 → Bỏ qua
+        assert is_in_roi(250, 50, 390, 90, 640, 480) is False
 
     def test_object_far_left_edge(self):
         """Vật thể tít bên lề trái (tâm X < 20% ảnh) → NGOÀI ROI."""

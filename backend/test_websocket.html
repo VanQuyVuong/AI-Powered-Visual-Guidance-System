@@ -1,126 +1,2283 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Test Real-time Video Tracking</title>
-    <style>
-        body { font-family: Arial, sans-serif; text-align: center; background: #121212; color: white; }
-        .video-container { position: relative; display: inline-block; width: 640px; max-width: 100%; border: 2px solid #4CAF50; border-radius: 8px; overflow: hidden; }
-        video { width: 100%; display: block; }
-        /* Canvas vẽ đè lên trên video */
-        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
-        #logs { margin-top: 20px; padding: 10px; background: #222; border-radius: 8px; height: 150px; overflow-y: auto; text-align: left; width: 640px; display: inline-block; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Visual Guidance · Triple Vision</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+/* ═══════════════════════════════════════════════════
+   DESIGN TOKENS
+═══════════════════════════════════════════════════ */
+:root {
+  --bg:       #0a0e17;
+  --surf:     #121826;
+  --surf2:    #1a2235;
+  --surf3:    #242e45;
+  --border:   rgba(255,255,255,0.08);
+  --border2:  rgba(0,212,255,0.25);
+  --accent:   #00e5ff;
+  --accent2:  #0066ff;
+  --safe:     #00ff88;
+  --warn:     #ffcc00;
+  --danger:   #ff4757;
+  --purple:   #b388ff;
+  --text:     #ffffff;
+  --muted:    rgba(255,255,255,0.55);
+  --mono:     'JetBrains Mono', monospace;
+  --sans:     'Inter', sans-serif;
+  --r:        12px;
+  --r-lg:     18px;
+  --r-pill:   100px;
+}
+
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+html,body { height:100%; overflow:hidden; background:var(--bg); }
+
+body {
+  font-family: var(--sans);
+  color: var(--text);
+  display: grid;
+  grid-template-rows: 52px 1fr 220px;
+  grid-template-columns: 1fr;
+  height: 100vh;
+}
+
+/* ═══════════════════════════════════════════════════
+   TOP BAR
+═══════════════════════════════════════════════════ */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  background: linear-gradient(135deg, rgba(10,14,23,0.98) 0%, rgba(18,24,38,0.95) 100%);
+  border-bottom: 1px solid var(--border2);
+  backdrop-filter: blur(24px);
+  z-index: 200;
+  position: relative;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+.topbar::after {
+  content:'';
+  position:absolute; bottom:0; left:0; right:0; height:1px;
+  background: linear-gradient(90deg,transparent,var(--accent),transparent);
+  opacity:.6;
+}
+.brand { display:flex; align-items:center; gap:12px; }
+.brand-logo {
+  width:36px; height:36px; border-radius:10px;
+  background: linear-gradient(135deg,var(--accent),var(--accent2));
+  display:flex; align-items:center; justify-content:center;
+  font-size:18px;
+  box-shadow: 0 0 20px rgba(0,229,255,.5);
+}
+.brand-name { font-size:14px; font-weight:800; letter-spacing:.1px; color:var(--text); }
+.brand-sub  { font-size:9px; color:var(--muted); letter-spacing:.6px; text-transform:uppercase; margin-top:2px; }
+
+.pills { display:flex; align-items:center; gap:8px; }
+.pill {
+  padding:5px 12px; border-radius:var(--r-pill);
+  font-size:10px; font-weight:600;
+  background:rgba(255,255,255,.06); border:1px solid var(--border);
+  color:var(--muted); display:flex; align-items:center; gap:6px;
+  transition: all 0.3s ease;
+}
+.pill.ok   { border-color:rgba(0,255,136,.4); color:var(--safe); background:rgba(0,255,136,.08); }
+.pill.live { border-color:rgba(0,229,255,.4); color:var(--accent); background:rgba(0,229,255,.08); }
+.pill.warn { border-color:rgba(255,71,87,.4);  color:var(--danger); background:rgba(255,71,87,.08); }
+.dot { width:6px; height:6px; border-radius:50%; background:currentColor; flex-shrink:0; }
+.pill.live .dot { animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+.topbar-right { display:flex; align-items:center; gap:16px; }
+.stat-inline  { font-size:11px; color:var(--muted); font-family:var(--mono); }
+.stat-inline b { color:var(--accent); font-weight:700; }
+
+/* ═══════════════════════════════════════════════════
+   THREE-PANEL MAIN AREA
+═══════════════════════════════════════════════════ */
+.panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+  padding: 6px;
+  overflow: hidden;
+}
+
+.panel {
+  position: relative;
+  border-radius: var(--r-lg);
+  background: #000;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.panel-hdr {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px 6px;
+  background: linear-gradient(180deg, rgba(0,0,0,.85) 0%, transparent 100%);
+}
+.panel-title {
+  font-size: 10px; font-weight: 800;
+  letter-spacing: 1.8px; text-transform: uppercase;
+  color: var(--accent);
+  display: flex; align-items: center; gap: 6px;
+}
+.panel-badge {
+  font-size: 9px; padding: 2px 7px;
+  border-radius: var(--r-pill);
+  background: rgba(0,212,255,.12);
+  border: 1px solid rgba(0,212,255,.25);
+  color: var(--accent);
+  font-family: var(--mono);
+}
+
+/* Panel 1 – YOLO */
+.panel-yolo { border-color: rgba(0,212,255,.2); }
+.panel-yolo .panel-title { color: var(--accent); }
+.panel-yolo .panel-badge { background:rgba(0,212,255,.12); border-color:rgba(0,212,255,.25); color:var(--accent); }
+
+/* Panel 2 – Depth */
+.panel-depth { border-color: rgba(168,85,247,.2); }
+.panel-depth .panel-title { color: var(--purple); }
+.panel-depth .panel-badge { background:rgba(168,85,247,.12); border-color:rgba(168,85,247,.25); color:var(--purple); }
+
+/* Panel 3 – Fusion */
+.panel-fusion { border-color: rgba(0,230,118,.2); }
+.panel-fusion .panel-title { color: var(--safe); }
+.panel-fusion .panel-badge { background:rgba(0,230,118,.12); border-color:rgba(0,230,118,.25); color:var(--safe); }
+
+/* Canvas & img inside panels */
+.panel canvas, .panel img {
+  position: absolute;
+  inset: 0; width: 100%; height: 100%;
+  object-fit: contain;
+}
+
+/* HUD corners */
+.hud-corner {
+  position:absolute; width:22px; height:22px;
+  border-color:currentColor; border-style:solid; border-width:0;
+  opacity:.45; z-index:10;
+}
+.hud-tl { top:8px; left:8px;  border-top-width:2px; border-left-width:2px; }
+.hud-tr { top:8px; right:8px; border-top-width:2px; border-right-width:2px; }
+.hud-bl { bottom:8px; left:8px;  border-bottom-width:2px; border-left-width:2px; }
+.hud-br { bottom:8px; right:8px; border-bottom-width:2px; border-right-width:2px; }
+
+/* Depth unavailable overlay */
+.depth-unavail {
+  position:absolute; inset:0; z-index:5;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:10px;
+  background: rgba(0,0,0,.82);
+  color: var(--muted);
+  font-size: 12px; text-align:center; line-height:1.7;
+  transition: opacity .5s;
+}
+.depth-unavail.hidden { display:none !important; }
+.depth-unavail .spin {
+  width:36px; height:36px; border-radius:50%;
+  border: 3px solid rgba(168,85,247,.2);
+  border-top-color: var(--purple);
+  animation: spin .9s linear infinite;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* ═══════════════════════════════════════════════════
+   BOTTOM PANEL – SYNTHESIZED INFO
+═══════════════════════════════════════════════════ */
+.bottom {
+  display: grid;
+  grid-template-columns: 200px 1fr 200px;
+  gap: 8px;
+  padding: 0 8px 8px;
+}
+
+/* Left: Zone + stats */
+.bot-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.zone-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; }
+.zone-card {
+  border-radius: var(--r); padding:10px 6px 8px;
+  text-align:center;
+  background:var(--surf); border:1px solid var(--border);
+  transition: all 0.3s ease;
+  position: relative; overflow:hidden;
+}
+.zone-card::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:3px;
+  background:transparent; transition:background .3s;
+}
+.zone-card.danger { border-color:var(--danger); box-shadow:0 0 20px rgba(255,71,87,.25); background:rgba(255,71,87,.05); }
+.zone-card.danger::before { background:var(--danger); }
+.zone-card.warn   { border-color:var(--warn); background:rgba(255,204,0,.05); }
+.zone-card.warn::before   { background:var(--warn); }
+.z-icon  { font-size:16px; margin-bottom:2px; }
+.z-name  { font-size:8px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; opacity:.45; }
+.z-count { font-size:24px; font-weight:900; line-height:1; }
+.zone-card.danger .z-count { color:var(--danger); }
+.zone-card.warn   .z-count { color:var(--warn); }
+
+.stat-mini { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.stat-box {
+  border-radius:var(--r); padding:10px 12px;
+  background:var(--surf); border:1px solid var(--border);
+}
+.st-label { font-size:8px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; opacity:.4; }
+.st-val   { font-size:20px; font-weight:900; color:var(--accent); line-height:1.1; margin-top:2px; }
+.st-unit  { font-size:8px; opacity:.35; }
+
+/* Center: Guidance + object list */
+.bot-center {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.guidance-card {
+  border-radius: var(--r-lg); padding:14px 18px;
+  background: var(--surf);
+  border: 1px solid var(--border);
+  position: relative;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+}
+.guidance-card.CRITICAL { border-color:var(--danger); background:rgba(255,71,87,.08); box-shadow:0 0 25px rgba(255,71,87,.3); }
+.guidance-card.HIGH     { border-color:var(--warn);   background:rgba(255,204,0,.08); box-shadow:0 0 20px rgba(255,204,0,.25); }
+.guidance-card.MEDIUM   { border-color:var(--accent); background:rgba(0,229,255,.06); }
+.guidance-label {
+  font-size:9px; font-weight:700; letter-spacing:2.5px;
+  text-transform:uppercase; opacity:.5; margin-bottom:6px;
+}
+.guidance-text {
+  font-size:14px; font-weight:700; line-height:1.5;
+  color: var(--text);
+}
+.guidance-text.CRITICAL { color:var(--danger); }
+.guidance-text.HIGH     { color:var(--warn); }
+.guidance-text.MEDIUM   { color:var(--accent); }
+.guidance-priority {
+  font-size:9px; font-family:var(--mono); opacity:.4; margin-top:4px;
+}
+.prio-bar {
+  height:4px; border-radius:2px; background:rgba(255,255,255,.08);
+  overflow:hidden; margin-top:8px;
+}
+.prio-bar-fill {
+  height:100%; border-radius:2px; background:var(--safe);
+  width:0%; transition: width 0.6s ease, background 0.6s ease;
+}
+.prio-bar-fill.CRITICAL { background:var(--danger); }
+.prio-bar-fill.HIGH     { background:var(--warn); }
+.prio-bar-fill.MEDIUM   { background:var(--accent); }
+
+/* Object list horizontal scroll */
+.obj-scroll {
+  flex:1;
+  overflow-x:auto; overflow-y:hidden;
+  display:flex; align-items:center; gap:6px;
+  padding: 4px 0;
+}
+.obj-scroll::-webkit-scrollbar { height:3px; }
+.obj-scroll::-webkit-scrollbar-thumb { background:rgba(255,255,255,.1); border-radius:3px; }
+.obj-chip {
+  flex-shrink:0;
+  display:flex; align-items:center; gap:8px;
+  padding:8px 12px; border-radius:var(--r);
+  background:var(--surf2); border:1px solid var(--border);
+  font-size:11px;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+.obj-chip:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+.obj-chip.in-roi { border-color:rgba(255,71,87,.4); background:rgba(255,71,87,.08); }
+.obj-chip.in-roi-warn { border-color:rgba(255,204,0,.35); background:rgba(255,204,0,.06); }
+.obj-chip-emo { font-size:16px; }
+.obj-chip-name { font-weight:700; color:var(--text); }
+.obj-chip-dist {
+  font-size:9px; font-weight:700; font-family:var(--mono);
+  padding:2px 6px; border-radius:4px;
+}
+.dc { background:rgba(255,71,87,.2); color:var(--danger); }
+.dh { background:rgba(255,204,0,.2); color:var(--warn); }
+.dm { background:rgba(0,229,255,.18); color:var(--accent); }
+.dl { background:rgba(0,255,136,.15); color:var(--safe); }
+.dn { background:rgba(255,255,255,.08); color:var(--muted); }
+
+/* Right: Log */
+.bot-right {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.log-hdr {
+  font-size:9px; font-weight:700; letter-spacing:2.5px;
+  text-transform:uppercase; color:var(--accent); opacity:.7;
+}
+.log-box {
+  flex:1; overflow-y:auto;
+  background:rgba(0,0,0,.5); border:1px solid rgba(255,255,255,.08);
+  border-radius:var(--r); padding:8px 10px;
+  font-size:10px; line-height:1.9; font-family:var(--mono);
+  color:rgba(255,255,255,.3);
+}
+.log-box::-webkit-scrollbar { width:3px; }
+.log-box::-webkit-scrollbar-thumb { background:rgba(255,255,255,.1); border-radius:3px; }
+.log-ok   { color:var(--safe); }
+.log-warn { color:var(--warn); }
+.log-err  { color:var(--danger); }
+.log-info { color:var(--accent); }
+
+/* ═══════════════════════════════════════════════════
+   START SCREEN
+═══════════════════════════════════════════════════ */
+#startScreen {
+  position:fixed; inset:0; z-index:500;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:24px;
+  background: radial-gradient(ellipse at 50% 40%, rgba(0,60,120,.35) 0%, rgba(10,14,23,.98) 65%);
+  backdrop-filter: blur(20px);
+  transition: opacity .7s cubic-bezier(.4,0,.2,1);
+}
+#startScreen::before {
+  content:''; position:absolute; inset:0;
+  background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%2300e5ff' fill-opacity='0.03'%3E%3Ccircle cx='30' cy='30' r='1'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  animation: patternDrift 30s linear infinite;
+}
+@keyframes patternDrift { to { background-position: 60px 60px; } }
+#startScreen.hidden { opacity:0; pointer-events:none; }
+
+.ss-glow {
+  position:absolute; width:500px; height:500px; border-radius:50%;
+  background: radial-gradient(circle, rgba(0,229,255,.12) 0%, transparent 70%);
+  filter: blur(60px); animation: glowPulse 4s ease-in-out infinite;
+  pointer-events:none;
+}
+@keyframes glowPulse {
+  0%,100% { opacity:.6; transform:scale(1); }
+  50% { opacity:1; transform:scale(1.15); }
+}
+
+.ss-icon {
+  font-size:72px; position:relative; z-index:1;
+  filter:drop-shadow(0 0 30px rgba(0,229,255,.7));
+  animation: iconFloat 3s ease-in-out infinite;
+}
+@keyframes iconFloat {
+  0%,100% { transform:translateY(0); }
+  50% { transform:translateY(-8px); }
+}
+.ss-title {
+  font-size:32px; font-weight:900; letter-spacing:-.5px;
+  background: linear-gradient(135deg,#fff 20%,var(--accent) 60%,var(--accent2) 100%);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  position:relative; z-index:1;
+  text-shadow: 0 0 40px rgba(0,229,255,.2);
+}
+.ss-sub {
+  font-size:13px; color:var(--muted); text-align:center;
+  line-height:1.85; max-width:520px; position:relative; z-index:1;
+}
+.ss-chips {
+  display:flex; gap:10px; flex-wrap:wrap; justify-content:center;
+  position:relative; z-index:1;
+}
+.ss-chip {
+  padding:6px 14px; border-radius:var(--r-pill);
+  font-size:11px; font-weight:600;
+  background:rgba(0,229,255,.06); border:1px solid rgba(0,229,255,.18);
+  color:var(--accent);
+  backdrop-filter:blur(8px);
+  transition: all .3s ease;
+}
+.ss-chip:hover {
+  background:rgba(0,229,255,.12); border-color:rgba(0,229,255,.35);
+  transform:translateY(-2px); box-shadow:0 4px 16px rgba(0,229,255,.15);
+}
+
+.ss-btns {
+  display:flex; gap:14px; margin-top:10px;
+  position:relative; z-index:1;
+  align-items:center;
+}
+#startBtn {
+  display:flex; align-items:center; gap:10px;
+  padding:16px 42px; border:none; border-radius:var(--r-pill);
+  background: linear-gradient(135deg,var(--accent) 0%,var(--accent2) 100%);
+  font-family:var(--sans); font-size:15px; font-weight:800;
+  color:#000; cursor:pointer;
+  box-shadow: 0 0 40px rgba(0,229,255,.4), 0 6px 24px rgba(0,0,0,.6);
+  transition: all .3s cubic-bezier(.4,0,.2,1);
+  position:relative; overflow:hidden;
+}
+#startBtn::after {
+  content:''; position:absolute; inset:0;
+  background: linear-gradient(135deg, rgba(255,255,255,.2) 0%, transparent 60%);
+  opacity:0; transition: opacity .3s;
+}
+#startBtn:hover {
+  transform:scale(1.06) translateY(-2px);
+  box-shadow:0 0 60px rgba(0,229,255,.6), 0 8px 32px rgba(0,0,0,.5);
+}
+#startBtn:hover::after { opacity:1; }
+#startBtn:active { transform:scale(.98); }
+
+#demoBtn {
+  display:flex; align-items:center; gap:8px;
+  padding:14px 28px; border-radius:var(--r-pill);
+  border:1.5px solid rgba(0,229,255,.3); background:rgba(0,229,255,.06);
+  color:var(--accent); font-weight:700; cursor:pointer;
+  font-family:var(--sans); font-size:13px;
+  backdrop-filter:blur(8px);
+  transition: all .3s ease;
+}
+#demoBtn:hover {
+  background:rgba(0,229,255,.12); border-color:rgba(0,229,255,.5);
+  transform:translateY(-2px); box-shadow:0 4px 20px rgba(0,229,255,.2);
+}
+
+#testAudioBtn {
+  display:flex; align-items:center; gap:8px;
+  padding:14px 28px; border-radius:var(--r-pill);
+  border:1.5px solid rgba(0,255,136,.3); background:rgba(0,255,136,.06);
+  color:var(--safe); font-weight:700; cursor:pointer;
+  font-family:var(--sans); font-size:13px;
+  backdrop-filter:blur(8px);
+  transition: all .3s ease;
+}
+#testAudioBtn:hover {
+  background:rgba(0,255,136,.12); border-color:rgba(0,255,136,.5);
+  transform:translateY(-2px); box-shadow:0 4px 20px rgba(0,255,136,.2);
+}
+#testAudioBtn.playing {
+  border-color:var(--safe); background:rgba(0,255,136,.15);
+  box-shadow:0 0 20px rgba(0,255,136,.3);
+}
+
+.ss-hint {
+  font-size:10px; color:rgba(255,255,255,.25);
+  position:relative; z-index:1;
+}
+.ss-hint b { color:var(--accent); }
+
+/* Audio status indicator */
+.audio-status {
+  display:flex; align-items:center; gap:6px;
+  font-size:10px; color:var(--muted);
+  position:relative; z-index:1;
+  margin-top:-8px;
+}
+.audio-status .audio-dot {
+  width:8px; height:8px; border-radius:50%;
+  background:var(--danger); transition: background .3s;
+}
+.audio-status.unlocked .audio-dot { background:var(--safe); }
+.audio-status.playing .audio-dot {
+  background:var(--safe);
+  animation: audioPulse .8s ease-in-out infinite;
+}
+@keyframes audioPulse {
+  0%,100% { transform:scale(1); box-shadow:0 0 0 0 rgba(0,255,136,.4); }
+  50% { transform:scale(1.3); box-shadow:0 0 8px 2px rgba(0,255,136,.3); }
+}
+
+/* Audio waveform bars */
+.audio-wave {
+  display:flex; align-items:center; gap:2px; height:14px;
+}
+.audio-wave .bar {
+  width:3px; border-radius:2px; background:var(--safe);
+  transition: height .15s ease;
+  height:4px;
+}
+.audio-wave.active .bar {
+  animation: waveBar .6s ease-in-out infinite;
+}
+.audio-wave.active .bar:nth-child(1) { animation-delay:0s; }
+.audio-wave.active .bar:nth-child(2) { animation-delay:.1s; }
+.audio-wave.active .bar:nth-child(3) { animation-delay:.2s; }
+.audio-wave.active .bar:nth-child(4) { animation-delay:.3s; }
+.audio-wave.active .bar:nth-child(5) { animation-delay:.15s; }
+@keyframes waveBar {
+  0%,100% { height:4px; opacity:.5; }
+  50% { height:14px; opacity:1; }
+}
+
+/* ═══════════════════════════════════════════════════
+   ALERT FLASH
+═══════════════════════════════════════════════════ */
+#alertFlash {
+  position:fixed; inset:0; z-index:400;
+  pointer-events:none; opacity:0; transition:opacity .15s;
+}
+#alertFlash.danger { background:rgba(255,59,92,.08); opacity:1; }
+#alertFlash.warn   { background:rgba(255,184,0,.06);  opacity:1; }
+
+/* ═══════════════════════════════════════════════════
+   FUSION PANEL OVERLAYS
+═══════════════════════════════════════════════════ */
+#fusionBanner {
+  position:absolute; bottom:14px; left:50%;
+  transform:translateX(-50%) translateY(10px);
+  background:rgba(3,6,9,.9); backdrop-filter:blur(20px);
+  border:1.5px solid rgba(255,255,255,.12); border-radius:var(--r-pill);
+  padding:10px 24px; font-size:13px; font-weight:700;
+  white-space:nowrap; max-width:92%;
+  text-align:center; opacity:0;
+  transition:opacity .5s cubic-bezier(.4,0,.2,1), transform .5s cubic-bezier(.4,0,.2,1), border-color .3s;
+  z-index:30; pointer-events:none;
+}
+#fusionBanner.show { opacity:1; transform:translateX(-50%) translateY(0); }
+#fusionBanner.CRITICAL { border-color:var(--danger); color:var(--danger); box-shadow:0 0 28px rgba(255,59,92,.35); }
+#fusionBanner.HIGH     { border-color:var(--warn);   color:var(--warn);   box-shadow:0 0 22px rgba(255,184,0,.3); }
+#fusionBanner.MEDIUM   { border-color:var(--accent); color:var(--accent); box-shadow:0 0 18px rgba(0,212,255,.25); }
+
+/* depth legend */
+.depth-legend {
+  position:absolute; top:38px; right:8px; z-index:15;
+  display:flex; flex-direction:column; gap:3px;
+}
+.depth-legend-item {
+  display:flex; align-items:center; gap:6px;
+  font-size:8px; font-family:var(--mono); color:rgba(255,255,255,.5);
+}
+.depth-legend-dot { width:8px; height:8px; border-radius:2px; flex-shrink:0; }
+
+/* Depth source badge */
+#depthSrcBadge {
+  position:absolute; bottom:8px; right:8px; z-index:20;
+  font-size:8px; font-family:var(--mono);
+  padding:3px 8px; border-radius:var(--r-pill);
+  background:rgba(168,85,247,.15); border:1px solid rgba(168,85,247,.3);
+  color:var(--purple);
+}
+</style>
 </head>
 <body>
-    <h2>Thử nghiệm Real-time Tracking & Bounding Box</h2>
-    
-    <button id="startBtn" style="padding: 20px 40px; font-size: 24px; background-color: #4CAF50; color: white; border: none; border-radius: 10px; cursor: pointer; margin-bottom: 20px; font-weight: bold; width: 640px; max-width: 100%;">🔴 BẤM VÀO ĐÂY ĐỂ BẮT ĐẦU</button>
-    <br>
 
-    <div class="video-container">
-        <video id="video" autoplay playsinline></video>
-        <canvas id="overlay"></canvas>
+<!-- ═══ TOP BAR ═══════════════════════════════════════════ -->
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-logo">👁️</div>
+    <div>
+      <div class="brand-name">AI Visual Guidance</div>
+      <div class="brand-sub">Triple Vision · YOLO + Depth Anything V2 · CPU Mode</div>
     </div>
-    <br>
-    
-    <div id="logs">Đang chờ kết nối...<br></div>
+  </div>
 
-    <script>
-        const video = document.getElementById('video');
-        const overlay = document.getElementById('overlay');
-        const ctx = overlay.getContext('2d');
-        const logs = document.getElementById('logs');
-        const startBtn = document.getElementById('startBtn');
-        let ws;
-        let videoWidth = 0;
-        let videoHeight = 0;
+  <div class="pills">
+    <div class="pill" id="camPill"><div class="dot"></div>Camera off</div>
+    <div class="pill" id="wsPill"><div class="dot"></div>WebSocket</div>
+    <div class="pill" id="aiPill"><div class="dot"></div>AI Engine</div>
+    <div class="pill" id="depthPill"><div class="dot"></div>Depth</div>
+    <div class="pill" id="audioPill"><div class="dot"></div>Audio off</div>
+    <div class="pill" id="modePill" onclick="toggleMode()" style="cursor:pointer"><div class="dot"></div>NAV Mode</div>
+  </div>
 
-        // Bật Camera
-        navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
-            video.srcObject = stream;
-            video.onloadedmetadata = () => {
-                videoWidth = video.videoWidth;
-                videoHeight = video.videoHeight;
-                // Chỉnh kích thước canvas overlay khớp với kích thước video thực
-                overlay.width = videoWidth;
-                overlay.height = videoHeight;
-            };
-        }).catch(err => {
-            logs.innerHTML += `<span style="color:red">Lỗi Camera: ${err}</span><br>`;
-        });
+  <div class="topbar-right">
+    <div class="stat-inline">FPS <b id="fpsVal">--</b></div>
+    <div class="stat-inline">Lat <b id="latVal">--</b>ms</div>
+    <div class="stat-inline">Obj <b id="objCountVal">--</b></div>
+    <div class="stat-inline">Mode <b id="modeVal">NAV</b></div>
+  </div>
+</header>
 
-        startBtn.onclick = () => {
-            if(ws && ws.readyState === WebSocket.OPEN) return;
-            
-            logs.innerHTML += `Đang kết nối tới WebSocket Server...<br>`;
-            ws = new WebSocket("ws://localhost:8000/api/v1/vision/stream");
-            
-            ws.onopen = () => {
-                logs.innerHTML += `<span style="color:green">Đã kết nối! Bắt đầu phân tích...</span><br>`;
-                startBtn.innerText = "Đang chạy AI...";
-                setInterval(sendFrame, 300); 
-            };
-            
-            ws.onmessage = (event) => {
-                const res = JSON.parse(event.data);
-                
-                // Xóa canvas cũ
-                ctx.clearRect(0, 0, overlay.width, overlay.height);
-                
-                // 1. Vẽ Vùng Quan Tâm (ROI) - Hình quạt/thang (Nửa dưới, bỏ 20% 2 bên)
-                ctx.fillStyle = "rgba(0, 255, 0, 0.2)"; // Màu xanh lá trong suốt
-                ctx.strokeStyle = "#00FF00";
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(videoWidth * 0.2, videoHeight * 0.4); // Góc trên trái của ROI
-                ctx.lineTo(videoWidth * 0.8, videoHeight * 0.4); // Góc trên phải của ROI
-                ctx.lineTo(videoWidth * 0.8, videoHeight);       // Góc dưới phải
-                ctx.lineTo(videoWidth * 0.2, videoHeight);       // Góc dưới trái
-                ctx.closePath();
-                ctx.fill();
-                ctx.stroke();
+<!-- ═══ THREE PANELS ══════════════════════════════════════ -->
+<div class="panels">
 
-                // 2. Vẽ Bounding Box cho từng vật thể lọt vào vùng
-                if(res.objects && res.objects.length > 0) {
-                    const objTexts = [];
-                    res.objects.forEach(obj => {
-                        objTexts.push(`[ID:${obj.id}] ${obj.class} (${obj.position})`);
-                        
-                        // Vẽ khung đỏ báo động
-                        if(obj.box) {
-                            ctx.strokeStyle = "red";
-                            ctx.lineWidth = 3;
-                            ctx.strokeRect(
-                                obj.box.x1, 
-                                obj.box.y1, 
-                                obj.box.x2 - obj.box.x1, 
-                                obj.box.y2 - obj.box.y1
-                            );
-                            
-                            // Vẽ tên
-                            ctx.fillStyle = "red";
-                            ctx.font = "bold 20px Arial";
-                            ctx.fillText(`ID:${obj.id} ${obj.class}`, obj.box.x1, obj.box.y1 - 5);
-                        }
-                    });
-                    logs.innerHTML = `<span style="color:yellow">CẢNH BÁO: ${objTexts.join(", ")}</span><br>` + logs.innerHTML;
-                }
-            };
-            
-            ws.onclose = () => logs.innerHTML += `<span style="color:red">Bị mất kết nối!</span><br>`;
-        };
+  <!-- PANEL 1 · YOLO RAW -->
+  <div class="panel panel-yolo" id="panelYolo">
+    <video id="video" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;" autoplay playsinline muted></video>
+    <canvas id="canvasYolo" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
 
-        function sendFrame() {
-            if(!ws || ws.readyState !== WebSocket.OPEN || videoWidth === 0) return;
-            const canvas = document.createElement("canvas");
-            canvas.width = videoWidth;
-            canvas.height = videoHeight;
-            canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
-            const base64Data = canvas.toDataURL("image/jpeg", 0.6); // Nén nhẹ hình ảnh
-            ws.send(base64Data);
+    <div class="hud-corner hud-tl" style="color:var(--accent)"></div>
+    <div class="hud-corner hud-tr" style="color:var(--accent)"></div>
+    <div class="hud-corner hud-bl" style="color:var(--accent)"></div>
+    <div class="hud-corner hud-br" style="color:var(--accent)"></div>
+
+    <div class="panel-hdr">
+      <div class="panel-title">🔍 YOLO Detection</div>
+      <div class="panel-badge" id="yoloBadge">0 obj</div>
+    </div>
+  </div>
+
+  <!-- PANEL 2 · DEPTH MAP -->
+  <div class="panel panel-depth" id="panelDepth">
+    <img id="depthImg" alt="depth map" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;">
+    <canvas id="canvasDepth" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+
+    <!-- Unavailable overlay -->
+    <div class="depth-unavail" id="depthUnavail">
+      <div class="spin"></div>
+      <div id="depthUnavailMsg">Đang tải Depth Anything V2 Small…<br><span style="font-size:10px;opacity:.6">~30-60s lần đầu</span></div>
+    </div>
+
+    <div class="hud-corner hud-tl" style="color:var(--purple)"></div>
+    <div class="hud-corner hud-tr" style="color:var(--purple)"></div>
+    <div class="hud-corner hud-bl" style="color:var(--purple)"></div>
+    <div class="hud-corner hud-br" style="color:var(--purple)"></div>
+
+    <div class="panel-hdr">
+      <div class="panel-title" style="color:var(--purple)">🌊 Depth Anything V2</div>
+      <div class="panel-badge" id="depthBadge">loading…</div>
+    </div>
+
+    <!-- Depth color legend -->
+    <div class="depth-legend">
+      <div class="depth-legend-item"><div class="depth-legend-dot" style="background:#ff0000"></div>Rất gần</div>
+      <div class="depth-legend-item"><div class="depth-legend-dot" style="background:#ffaa00"></div>Gần</div>
+      <div class="depth-legend-item"><div class="depth-legend-dot" style="background:#00ff88"></div>TB</div>
+      <div class="depth-legend-item"><div class="depth-legend-dot" style="background:#0088ff"></div>Xa</div>
+      <div class="depth-legend-item"><div class="depth-legend-dot" style="background:#0000aa"></div>Rất xa</div>
+    </div>
+
+    <div id="depthSrcBadge">⚡ CPU · Stride 3</div>
+  </div>
+
+  <!-- PANEL 3 · FUSION (Central Processor) -->
+  <div class="panel panel-fusion" id="panelFusion">
+    <div id="threeContainer" style="position:absolute;inset:0;width:100%;height:100%;"></div>
+    <canvas id="canvasFusion" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+
+    <div class="hud-corner hud-tl" style="color:var(--safe)"></div>
+    <div class="hud-corner hud-tr" style="color:var(--safe)"></div>
+    <div class="hud-corner hud-bl" style="color:var(--safe)"></div>
+    <div class="hud-corner hud-br" style="color:var(--safe)"></div>
+
+    <div class="panel-hdr">
+      <div class="panel-title" style="color:var(--safe)">⚡ 3D Navigation · Lộ Trình</div>
+      <div class="panel-badge" id="fusionBadge" style="background:rgba(0,230,118,.12);border-color:rgba(0,230,118,.3);color:var(--safe)">ready</div>
+    </div>
+
+    <!-- Guidance banner on fusion panel -->
+    <div id="fusionBanner">—</div>
+  </div>
+
+</div>
+
+<!-- ═══ BOTTOM BAR ════════════════════════════════════════ -->
+<div class="bottom">
+
+  <!-- Left: Zones + stats -->
+  <div class="bot-left">
+    <div class="zone-row">
+      <div class="zone-card" id="zL"><div class="z-icon">◀</div><div class="z-name">Trái</div><div class="z-count" id="cntL">0</div></div>
+      <div class="zone-card" id="zC"><div class="z-icon">⬆</div><div class="z-name">Trước</div><div class="z-count" id="cntC">0</div></div>
+      <div class="zone-card" id="zR"><div class="z-icon">▶</div><div class="z-name">Phải</div><div class="z-count" id="cntR">0</div></div>
+    </div>
+    <div class="stat-mini">
+      <div class="stat-box">
+        <div class="st-label">Phát hiện</div>
+        <div class="st-val" id="statTotal">0</div>
+        <div class="st-unit">vật thể</div>
+      </div>
+      <div class="stat-box">
+        <div class="st-label">Nguy hiểm</div>
+        <div class="st-val" id="statDanger" style="color:var(--danger)">0</div>
+        <div class="st-unit">ROI alert</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Center: Guidance + chips -->
+  <div class="bot-center">
+    <div class="guidance-card" id="guidanceCard">
+      <div class="guidance-label">Hướng dẫn thông minh</div>
+      <div class="guidance-text" id="guidanceText">Chờ dữ liệu từ AI…</div>
+      <div class="guidance-priority" id="guidanceMeta">priority: —</div>
+      <div class="prio-bar"><div class="prio-bar-fill" id="prioBar"></div></div>
+    </div>
+    <div class="obj-scroll" id="objScroll">
+      <div style="font-size:11px;color:var(--muted);padding:8px">Nhấn "Bắt đầu" để khởi động…</div>
+    </div>
+  </div>
+
+  <!-- Right: Log -->
+  <div class="bot-right">
+    <div class="log-hdr">Nhật ký hệ thống</div>
+    <div class="log-box" id="logBox"><span class="log-info">System ready · Triple Vision Mode.</span></div>
+  </div>
+
+</div>
+
+<!-- Start Screen -->
+<div id="startScreen">
+  <div class="ss-glow"></div>
+  <div class="ss-icon">👁️</div>
+  <div class="ss-title">AI Visual Guidance · Triple Vision</div>
+  <div class="ss-sub">
+    Ba khung hình song song: YOLO Detect · Depth Anything V2 · Fusion Engine.<br>
+    Gom nhóm vật thể · Vùng an toàn · Lộ trình né tránh · Cảnh báo thông minh.
+  </div>
+  <div class="ss-chips">
+    <span class="ss-chip">🔍 YOLO v8 Detect</span>
+    <span class="ss-chip">🌊 Depth AI V2</span>
+    <span class="ss-chip">⚡ Fusion Engine</span>
+    <span class="ss-chip">🧩 Gom nhóm vật thể</span>
+    <span class="ss-chip">🗺️ Lộ trình né tránh</span>
+    <span class="ss-chip">🔊 Cảnh báo TTS</span>
+  </div>
+  <div class="ss-btns">
+    <button id="startBtn">▶ &nbsp;Bắt đầu Camera</button>
+    <button id="demoBtn">🧪 Test ảnh mẫu</button>
+    <button id="testAudioBtn">🔊 Test Audio</button>
+  </div>
+  <div class="audio-status" id="audioStatus">
+    <div class="audio-dot"></div>
+    <span id="audioStatusText">Audio chưa kích hoạt</span>
+    <div class="audio-wave" id="audioWave">
+      <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+    </div>
+  </div>
+  <p class="ss-hint">Mở tại <b>http://localhost:8000/</b> — nhấn nút bất kỳ để kích hoạt audio.</p>
+</div>
+
+<div id="alertFlash"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════
+   CONSTANTS & MAPS
+═══════════════════════════════════════════════════════ */
+const EMOJI_MAP = {
+  person:'🧍', car:'🚗', truck:'🚛', bus:'🚌', motorcycle:'🏍️',
+  bicycle:'🚲', dog:'🐕', cat:'🐈', chair:'🪑', bottle:'🍼',
+  table:'🪑', laptop:'💻', phone:'📱', 'stop sign':'🛑',
+  'traffic light':'🚦', backpack:'🎒', umbrella:'☂️', suitcase:'🧳',
+  bed:'🛏️', tv:'📺', tie:'👔', cup:'☕', handbag:'👜',
+  'potted plant':'🪴', clock:'⏰', vase:'🏺', scissors:'✂️',
+  'cell phone':'📱', remote:'🎮', default:'📦'
+};
+const VN_MAP = {
+  person:'Người', car:'Xe ô tô', truck:'Xe tải', bus:'Xe buýt',
+  motorcycle:'Xe máy', bicycle:'Xe đạp', dog:'Chó', cat:'Mèo',
+  chair:'Ghế', bottle:'Chai', table:'Bàn', laptop:'Laptop',
+  phone:'Điện thoại', 'cell phone':'Điện thoại',
+  'stop sign':'Biển dừng', 'traffic light':'Đèn GT',
+  backpack:'Ba lô', umbrella:'Dù', suitcase:'Vali', bed:'Giường',
+  tv:'Tivi', tie:'Cà vạt', cup:'Cốc', handbag:'Túi xách',
+  'potted plant':'Cây', clock:'Đồng hồ', vase:'Lọ hoa',
+  scissors:'Kéo', remote:'Điều khiển',
+};
+const POS_VN = { left:'Trái', right:'Phải', center:'Trước' };
+const LEVEL_DCLASS = { CRITICAL:'dc', HIGH:'dh', MEDIUM:'dm', LOW:'dl', NONE:'dn' };
+
+const vn    = c => VN_MAP[c?.toLowerCase()] || c || '?';
+const emo   = c => EMOJI_MAP[c?.toLowerCase()] || EMOJI_MAP.default;
+const vnpos = p => POS_VN[p] || p || '?';
+
+/* ═══════════════════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════════════════ */
+let ws, liveCamera = false;
+let videoWidth = 0, videoHeight = 0;
+let frameInterval = null, waitingReply = false;
+let sendTs = 0, frameCount = 0, fpsTimer = Date.now();
+let frameCanvas = null;
+let fusionStaticCanvas = null;   // static depth zones for fusion panel
+let lastGuidance = '', lastPriority = '';
+let guidanceTimer = null, flashTimer = null;
+let currentAudio = null, lastPlayTime = 0;
+let demoRetries = 0;
+const MIN_PLAY_INTERVAL = 3000; // 3 giây giữa các lần phát audio
+let audioUnlocked = false;
+let audioContext = null;
+let currentMode = 'NAVIGATION'; // NAVIGATION or CONVERSATION
+let lastVisionObjects = [];
+let lastFrameMeta = {width: 640, height: 480};
+
+// Three.js 3D Scene
+let scene, camera, renderer, threeObjects = [];
+let pathLine, pathArrow, navDirection = 'straight';
+
+// Voice Command Detection
+let recognition = null;
+let voiceListening = false;
+let conversationTimer = null;
+const CONVERSATION_TIMEOUT = 15000; // 15 giây sau khi trả lời thì quay lại NAV mode
+
+/* ═══════════════════════════════════════════════════════
+   DOM REFS
+═══════════════════════════════════════════════════════ */
+const video       = document.getElementById('video');
+const canvasYolo  = document.getElementById('canvasYolo');
+const canvasDepth = document.getElementById('canvasDepth');
+const canvasFusion= document.getElementById('canvasFusion');
+const ctxY        = canvasYolo.getContext('2d');
+const ctxD        = canvasDepth.getContext('2d');
+const ctxF        = canvasFusion.getContext('2d');
+const depthImg    = document.getElementById('depthImg');
+const depthUnavail= document.getElementById('depthUnavail');
+
+const camPill    = document.getElementById('camPill');
+const wsPill     = document.getElementById('wsPill');
+const aiPill     = document.getElementById('aiPill');
+const depthPill  = document.getElementById('depthPill');
+const audioPill  = document.getElementById('audioPill');
+const modePill   = document.getElementById('modePill');
+const fpsVal     = document.getElementById('fpsVal');
+const latVal     = document.getElementById('latVal');
+const objCountVal= document.getElementById('objCountVal');
+const modeVal    = document.getElementById('modeVal');
+const yoloBadge  = document.getElementById('yoloBadge');
+const depthBadge = document.getElementById('depthBadge');
+const fusionBadge= document.getElementById('fusionBadge');
+const fusionBannerEl= document.getElementById('fusionBanner');
+const logBox     = document.getElementById('logBox');
+const zL=document.getElementById('zL'), zC=document.getElementById('zC'), zR=document.getElementById('zR');
+const cntL=document.getElementById('cntL'), cntC=document.getElementById('cntC'), cntR=document.getElementById('cntR');
+const statTotal  = document.getElementById('statTotal');
+const statDanger = document.getElementById('statDanger');
+const guidCard   = document.getElementById('guidanceCard');
+const guidText   = document.getElementById('guidanceText');
+const guidMeta   = document.getElementById('guidanceMeta');
+const prioBar    = document.getElementById('prioBar');
+const objScroll  = document.getElementById('objScroll');
+const startScreen= document.getElementById('startScreen');
+const startBtn   = document.getElementById('startBtn');
+const demoBtn    = document.getElementById('demoBtn');
+const testAudioBtn = document.getElementById('testAudioBtn');
+const alertFlash = document.getElementById('alertFlash');
+
+/* ═══════════════════════════════════════════════════════
+   LOGGING
+═══════════════════════════════════════════════════════ */
+function log(msg, type='info') {
+  const t = new Date().toLocaleTimeString('vi');
+  logBox.innerHTML = `<span class="log-${type}">[${t}] ${msg}</span>\n` + logBox.innerHTML;
+}
+
+async function toggleMode() {
+  const newMode = currentMode === 'NAVIGATION' ? 'CONVERSATION' : 'NAVIGATION';
+  try {
+    const res = await fetch('/api/v1/vision/mode', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode: newMode})
+    });
+    const data = await res.json();
+    if (data.success) {
+      currentMode = newMode;
+      lastGuidance = '';
+      lastPriority = '';
+      updateModeUI();
+      const msg = data.message || (newMode === 'CONVERSATION'
+        ? 'Đã chuyển sang hỏi đáp. Bạn muốn hỏi gì?'
+        : 'Đã quay lại hướng dẫn đường.');
+      log(`Chế độ chuyển sang: ${newMode}`, 'ok');
+      showModeAnnouncement(msg, newMode);
+      if (newMode === 'CONVERSATION') {
+        startVoiceListening();
+        resetConversationTimer();
+      } else {
+        clearTimeout(conversationTimer);
+      }
+    } else {
+      log('Không đổi được mode: ' + (data.error || res.status), 'err');
+    }
+  } catch(e) {
+    log('Lỗi chuyển chế độ: ' + e, 'err');
+  }
+}
+
+function showModeAnnouncement(msg, mode) {
+  guidCard.className = 'guidance-card MEDIUM';
+  guidText.className = 'guidance-text MEDIUM';
+  guidText.textContent = msg;
+  guidMeta.textContent = mode === 'CONVERSATION' ? 'CHAT · hỏi bằng giọng nói' : 'NAV · hướng dẫn đường';
+  showFusionBanner(msg, 'MEDIUM', '');
+  speakLocal(msg);
+}
+
+function speakLocal(text) {
+  try {
+    if (!window.speechSynthesis || !text) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'vi-VN';
+    u.rate = 1.05;
+    window.speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+function resetConversationTimer() {
+  clearTimeout(conversationTimer);
+  conversationTimer = setTimeout(() => {
+    if (currentMode === 'CONVERSATION') {
+      switchToNavigationMode();
+      log('Auto: Quay lại NAVIGATION mode (timeout)', 'info');
+    }
+  }, CONVERSATION_TIMEOUT);
+}
+
+function updateModeUI() {
+  modePill.className = 'pill ' + (currentMode === 'NAVIGATION' ? 'ok' : 'live');
+  modePill.innerHTML = `<div class="dot"></div>${currentMode === 'NAVIGATION' ? 'NAV Mode' : 'CHAT Mode'}`;
+  modeVal.textContent = currentMode === 'NAVIGATION' ? 'NAV' : 'CHAT';
+}
+
+// ─── VOICE COMMAND DETECTION ─────────────────────────────────────────
+function initVoiceRecognition() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    log('Trình duyệt không hỗ trợ voice recognition', 'warn');
+    return;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SpeechRecognition();
+  recognition.lang = 'vi-VN';
+  recognition.continuous = true;
+  recognition.interimResults = false;
+
+  recognition.onresult = (event) => {
+    const last = event.results.length - 1;
+    const command = event.results[last][0].transcript.toLowerCase().trim();
+    log(`Voice: "${command}"`, 'info');
+
+    // Phát hiện lệnh chuyển sang CONVERSATION mode
+    const wakeWords = ['hey you', 'tôi muốn hỏi', 'hỏi cái gì', 'cho tôi hỏi', 'nói đi'];
+    const wakeWordDetected = wakeWords.some(word => command.includes(word));
+
+    if (wakeWordDetected && currentMode === 'NAVIGATION') {
+      switchToConversationMode();
+      return;
+    }
+
+    // Phát hiện lệnh quay lại NAVIGATION mode
+    const backToNavWords = ['đi đi', 'tiếp tục', 'trả đi', 'đủ rồi', 'cảm ơn'];
+    const backToNavDetected = backToNavWords.some(word => command.includes(word));
+
+    if (backToNavDetected && currentMode === 'CONVERSATION') {
+      switchToNavigationMode();
+      return;
+    }
+
+    if (currentMode === 'CONVERSATION') {
+      askSceneQuestion(command);
+    }
+  };
+
+  recognition.onerror = (event) => {
+    if (event.error !== 'no-speech') {
+      log(`Voice error: ${event.error}`, 'warn');
+    }
+  };
+
+  recognition.onend = () => {
+    // Tự động restart nếu vẫn cần lắng nghe
+    if (voiceListening) {
+      try {
+        recognition.start();
+      } catch(e) {}
+    }
+  };
+}
+
+function startVoiceListening() {
+  if (!recognition) {
+    initVoiceRecognition();
+  }
+  if (recognition && !voiceListening) {
+    try {
+      recognition.start();
+      voiceListening = true;
+      log('Voice listening started', 'ok');
+    } catch(e) {
+      log('Lỗi start voice: ' + e, 'err');
+    }
+  }
+}
+
+function stopVoiceListening() {
+  if (recognition && voiceListening) {
+    recognition.stop();
+    voiceListening = false;
+    log('Voice listening stopped', 'info');
+  }
+}
+
+async function switchToConversationMode() {
+  if (currentMode === 'CONVERSATION') return;
+
+  try {
+    const res = await fetch('/api/v1/vision/mode', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode: 'CONVERSATION'})
+    });
+    const data = await res.json();
+    if (data.success) {
+      currentMode = 'CONVERSATION';
+      updateModeUI();
+      lastGuidance = '';
+      log('Voice: Chuyển sang CONVERSATION mode', 'ok');
+      showModeAnnouncement(data.message || 'Đã chuyển sang hỏi đáp. Bạn muốn hỏi gì?', 'CONVERSATION');
+
+      // Flash alert
+      alertFlash.className = 'warn';
+      setTimeout(() => alertFlash.className = '', 300);
+      resetConversationTimer();
+    }
+  } catch(e) {
+    log('Lỗi chuyển chế độ: ' + e, 'err');
+  }
+}
+
+async function switchToNavigationMode() {
+  if (currentMode === 'NAVIGATION') return;
+
+  clearTimeout(conversationTimer);
+
+  try {
+    const res = await fetch('/api/v1/vision/mode', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode: 'NAVIGATION'})
+    });
+    const data = await res.json();
+    if (data.success) {
+      currentMode = 'NAVIGATION';
+      updateModeUI();
+      log('Chuyển sang NAVIGATION mode', 'info');
+    }
+  } catch(e) {
+    log('Lỗi chuyển chế độ: ' + e, 'err');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   CAMERA
+═══════════════════════════════════════════════════════ */
+function startCamera(stream) {
+  video.srcObject = stream;
+  const ready = () => {
+    videoWidth  = video.videoWidth;
+    videoHeight = video.videoHeight;
+    syncCanvases(videoWidth, videoHeight);
+    camPill.className = 'pill ok';
+    camPill.innerHTML = '<div class="dot"></div>Camera OK';
+    log(`Camera ${videoWidth}×${videoHeight}`, 'ok');
+  };
+  video.onloadedmetadata = ready;
+  video.play().then(ready).catch(()=>{});
+}
+
+function syncCanvases(w, h) {
+  [canvasYolo, canvasDepth, canvasFusion].forEach(c => {
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  });
+  fusionStaticCanvas = null; // invalidate static cache
+}
+
+(async () => {
+  const constraints = [
+    { video: { facingMode:{ideal:'environment'}, width:{ideal:1280}, height:{ideal:720} } },
+    { video: true }
+  ];
+  for (const c of constraints) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(c);
+      startCamera(stream);
+      return;
+    } catch(e) {}
+  }
+  camPill.className = 'pill warn';
+  camPill.innerHTML = '<div class="dot"></div>Camera ERR';
+  log('Camera không khả dụng. Dùng Test ảnh mẫu.', 'err');
+})();
+
+/* ═══════════════════════════════════════════════════════
+   WEBSOCKET
+═══════════════════════════════════════════════════════ */
+function connectStream(onReady) {
+  if (ws && ws.readyState === WebSocket.OPEN) { if (onReady) onReady(); return; }
+  log('Kết nối WebSocket…', 'info');
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host || 'localhost:8000'}/api/v1/vision/stream`);
+
+  ws.onopen = () => {
+    wsPill.className = 'pill live'; wsPill.innerHTML = '<div class="dot"></div>WS Live';
+    aiPill.className = 'pill live'; aiPill.innerHTML = '<div class="dot"></div>AI Running';
+    log('WebSocket OK', 'ok');
+    if (onReady) onReady();
+  };
+
+  ws.onmessage = evt => {
+    waitingReply = false;
+    const lat = Date.now() - sendTs;
+    latVal.textContent = lat;
+
+    let data;
+    try { data = JSON.parse(evt.data); } catch(e) { scheduleNext(); return; }
+    if (!data.success) {
+      log(`Frame err: ${data.error}`, 'err');
+      scheduleNext(); return;
+    }
+
+    // FPS counter
+    frameCount++;
+    const now = Date.now();
+    if (now - fpsTimer >= 1000) {
+      fpsVal.textContent = frameCount;
+      frameCount = 0; fpsTimer = now;
+    }
+
+    renderAll(data);
+
+    // Demo retry for TTS
+    if (!liveCamera && data.guidance?.text && !data.guidance?.audio_base64 && demoRetries < 3) {
+      demoRetries++;
+      setTimeout(sendDemoImage, 2000);
+    }
+
+    scheduleNext();
+  };
+
+  ws.onclose = () => {
+    waitingReply = false;
+    wsPill.className = 'pill warn'; wsPill.innerHTML = '<div class="dot"></div>Disconnected';
+    aiPill.className = 'pill'; aiPill.innerHTML = '<div class="dot"></div>AI Stopped';
+    log('WebSocket đóng.', 'err');
+    clearTimeout(frameInterval);
+    startScreen.classList.remove('hidden');
+  };
+
+  ws.onerror = () => log('WS error — backend chưa chạy port 8000?', 'err');
+}
+
+/* ═══════════════════════════════════════════════════════
+   AUDIO UNLOCK & MANAGEMENT
+   Browser autoplay policy requires user gesture to unlock AudioContext.
+   We use Web Audio API for the unlock, then regular Audio elements for TTS.
+═══════════════════════════════════════════════════════ */
+function unlockAudio() {
+  if (audioUnlocked) return Promise.resolve();
+  return new Promise((resolve) => {
+    try {
+      // Create or resume AudioContext (this is the correct browser unlock)
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioContext.state === 'suspended') {
+        audioContext.resume().then(() => {
+          audioUnlocked = true;
+          updateAudioStatus('unlocked', 'Audio đã kích hoạt ✓');
+          log('🔊 Audio đã được kích hoạt (AudioContext)', 'ok');
+          resolve();
+        }).catch(() => resolve());
+      } else {
+        audioUnlocked = true;
+        updateAudioStatus('unlocked', 'Audio đã kích hoạt ✓');
+        log('🔊 Audio đã được kích hoạt', 'ok');
+        resolve();
+      }
+    } catch(e) {
+      log('Lỗi kích hoạt audio: ' + e, 'err');
+      resolve();
+    }
+  });
+}
+
+function updateAudioStatus(state, text) {
+  const statusEl = document.getElementById('audioStatus');
+  const textEl = document.getElementById('audioStatusText');
+  const waveEl = document.getElementById('audioWave');
+  if (statusEl) statusEl.className = 'audio-status ' + state;
+  if (textEl) textEl.textContent = text;
+  if (waveEl) waveEl.className = 'audio-wave ' + (state === 'playing' ? 'active' : '');
+  // Update topbar pill
+  if (audioPill) {
+    if (state === 'playing') {
+      audioPill.className = 'pill live';
+      audioPill.innerHTML = '<div class="dot"></div>Audio ▶';
+    } else if (state === 'unlocked') {
+      audioPill.className = 'pill ok';
+      audioPill.innerHTML = '<div class="dot"></div>Audio OK';
+    } else {
+      audioPill.className = 'pill warn';
+      audioPill.innerHTML = '<div class="dot"></div>Audio off';
+    }
+  }
+}
+
+function playTestBeep() {
+  // Generate a real audible beep using Web Audio API oscillator
+  return new Promise((resolve) => {
+    try {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+      audioUnlocked = true;
+
+      // Create a pleasant two-tone beep
+      const now = audioContext.currentTime;
+      const gain = audioContext.createGain();
+      gain.connect(audioContext.destination);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+
+      const osc1 = audioContext.createOscillator();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(880, now); // A5
+      osc1.connect(gain);
+      osc1.start(now);
+      osc1.stop(now + 0.15);
+
+      const gain2 = audioContext.createGain();
+      gain2.connect(audioContext.destination);
+      gain2.gain.setValueAtTime(0.3, now + 0.18);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
+
+      const osc2 = audioContext.createOscillator();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(1320, now + 0.18); // E6
+      osc2.connect(gain2);
+      osc2.start(now + 0.18);
+      osc2.stop(now + 0.4);
+
+      updateAudioStatus('playing', 'Đang phát test beep…');
+      setTimeout(() => {
+        updateAudioStatus('unlocked', 'Audio đã kích hoạt ✓');
+        resolve();
+      }, 600);
+    } catch(e) {
+      log('Không thể phát beep: ' + e, 'err');
+      resolve();
+    }
+  });
+}
+
+startBtn.onclick = async () => {
+  await unlockAudio();
+  liveCamera = true;
+  startScreen.classList.add('hidden');
+  connectStream(() => scheduleNext());
+  startVoiceListening();
+};
+
+demoBtn.onclick = async () => {
+  await unlockAudio();
+  liveCamera = false; demoRetries = 0;
+  startScreen.classList.add('hidden');
+  try {
+    const r = await fetch('/api/v1/vision/demo');
+    const data = await r.json();
+    if (data.success) {
+      if (data.frame_meta) {
+        const w = data.frame_meta.width || 640;
+        const h = data.frame_meta.height || 480;
+        syncCanvases(w, h);
+        videoWidth = w; videoHeight = h;
+      }
+      renderAll(data);
+      return;
+    }
+  } catch(e) {}
+  connectStream(() => sendDemoImage());
+};
+
+testAudioBtn.onclick = async () => {
+  const btn = document.getElementById('testAudioBtn');
+  btn.classList.add('playing');
+  log('🔊 Đang test audio...', 'info');
+  await unlockAudio();
+  await playTestBeep();
+  log('✓ Audio hoạt động bình thường', 'ok');
+  setTimeout(() => btn.classList.remove('playing'), 800);
+};
+
+function scheduleNext() {
+  clearTimeout(frameInterval);
+  if (!liveCamera || !ws || ws.readyState !== WebSocket.OPEN) return;
+  // Giảm delay từ 120ms xuống 100ms để phản hồi nhanh hơn
+  frameInterval = requestAnimationFrame(() => setTimeout(sendFrame, 100));
+}
+
+/* ═══════════════════════════════════════════════════════
+   SEND FRAME
+═══════════════════════════════════════════════════════ */
+function sendFrame() {
+  if (!ws || ws.readyState !== WebSocket.OPEN || waitingReply) return;
+  const vw = video.videoWidth || 0, vh = video.videoHeight || 0;
+  if (!vw || video.readyState < 2) { scheduleNext(); return; }
+
+  // Giảm độ phân giải để giảm độ trễ: từ 640 xuống 480
+  const maxW = 480;
+  const scale = Math.min(1, maxW / vw);
+  const w = Math.max(1, Math.round(vw * scale));
+  const h = Math.max(1, Math.round(vh * scale));
+
+  syncCanvases(w, h);
+  videoWidth = w; videoHeight = h;
+
+  if (!frameCanvas || frameCanvas.width !== w || frameCanvas.height !== h) {
+    frameCanvas = document.createElement('canvas');
+    frameCanvas.width = w; frameCanvas.height = h;
+  }
+  frameCanvas.getContext('2d').drawImage(video, 0, 0, w, h);
+  sendTs = Date.now();
+  waitingReply = true;
+  // Giảm quality để giảm bandwidth
+  ws.send(frameCanvas.toDataURL('image/jpeg', 0.65));
+}
+
+async function sendDemoImage() {
+  try {
+    log('Gửi ảnh mẫu bus.jpg…', 'info');
+    const img = new Image(); img.crossOrigin = 'anonymous'; img.src = '/demo/bus.jpg';
+    await img.decode();
+    const w = img.naturalWidth, h = img.naturalHeight;
+    syncCanvases(w, h); videoWidth = w; videoHeight = h;
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(img, 0, 0);
+    sendTs = Date.now(); waitingReply = true;
+    ws.send(c.toDataURL('image/jpeg', 0.85));
+  } catch(e) { log('Lỗi tải ảnh mẫu: ' + e, 'err'); }
+}
+
+/* ═══════════════════════════════════════════════════════
+   MAIN RENDER ORCHESTRATOR
+═══════════════════════════════════════════════════════ */
+function renderAll(res) {
+  const W = videoWidth, H = videoHeight;
+  if (!W || !H) return;
+
+  const objects  = res.objects  || [];
+  const guidance = res.guidance || {};
+  lastVisionObjects = objects;
+  if (res.frame_meta) lastFrameMeta = res.frame_meta;
+  if (res.mode && res.mode !== currentMode) {
+    currentMode = res.mode;
+    updateModeUI();
+  }
+  const depth    = res.depth    || {};
+  const navigation = res.navigation || {}; // {direction: "straight"|"left"|"right"|"stop", confidence: 0-1}
+
+  // Count stats
+  let nL=0, nC=0, nR=0, nDanger=0, topPrio='NONE';
+  const PRIO = {CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3,NONE:4};
+  objects.forEach(o => {
+    if (!o.in_roi) return;
+    nDanger++;
+    if (o.position==='left') nL++;
+    else if (o.position==='right') nR++;
+    else nC++;
+    const lv = o.distance?.level || 'NONE';
+    if (PRIO[lv] < PRIO[topPrio]) topPrio = lv;
+  });
+
+  objCountVal.textContent = objects.length;
+
+  // Panel 1 – YOLO
+  renderYolo(objects, W, H);
+
+  // Panel 2 – Depth
+  renderDepth(depth, W, H);
+
+  // Panel 3 – Fusion (with navigation direction from backend)
+  renderFusion(objects, guidance, depth, W, H, topPrio, navigation);
+
+  // Panel 3 – 3D Scene update
+  update3DScene(objects, navigation);
+
+  // Bottom UI
+  updateBottom(objects, nL, nC, nR, nDanger, topPrio, guidance);
+
+  // Alert flash
+  doFlash(topPrio);
+
+  // Request animation frame for smooth line animation
+  if (liveCamera) {
+    requestAnimationFrame(() => {
+      // Re-render just the navigation path for animation
+      const inRoi = objects.filter(o => o.in_roi);
+      if (inRoi.length > 0 || nDanger === 0) {
+        // Only animate if there's navigation to show
+        const vx = W / 2;
+        const vy = H * 0.35;
+        drawNavigationPath(W, H, vx, vy, objects, navigation);
+      }
+    });
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   PANEL 1 – YOLO (raw detections, ALL objects, no clustering)
+═══════════════════════════════════════════════════════ */
+function renderYolo(objects, W, H) {
+  ctxY.clearRect(0, 0, W, H);
+
+  // Draw current video frame onto canvas (so we can see the video in the canvas)
+  if (video.readyState >= 2) {
+    ctxY.drawImage(video, 0, 0, W, H);
+  }
+
+  yoloBadge.textContent = objects.length + ' obj';
+
+  objects.forEach(obj => {
+    const box  = obj.bounding_box;
+    if (!box) return;
+    const inRoi  = !!obj.in_roi;
+    const dist   = obj.distance || {};
+    const lvl    = dist.level || 'NONE';
+    const color  = inRoi
+      ? ({CRITICAL:'#ff3b5c',HIGH:'#ffb800',MEDIUM:'#00d4ff',LOW:'#00e676'}[lvl] || '#fff')
+      : 'rgba(255,255,255,0.28)';
+
+    const bw = box.x2-box.x1, bh = box.y2-box.y1;
+
+    ctxY.save();
+    if (inRoi) { ctxY.shadowColor = color; ctxY.shadowBlur = 14; }
+    ctxY.strokeStyle = color;
+    ctxY.lineWidth   = inRoi ? 2 : 1;
+    ctxY.strokeRect(box.x1, box.y1, bw, bh);
+    ctxY.shadowBlur  = 0;
+
+    // Corner brackets for ROI objects
+    if (inRoi) {
+      const cl = 11;
+      ctxY.lineWidth = 2.5;
+      [[box.x1,box.y1,1,1],[box.x2,box.y1,-1,1],[box.x1,box.y2,1,-1],[box.x2,box.y2,-1,-1]].forEach(([cx,cy,sx,sy])=>{
+        ctxY.beginPath(); ctxY.moveTo(cx,cy+sy*cl); ctxY.lineTo(cx,cy); ctxY.lineTo(cx+sx*cl,cy); ctxY.stroke();
+      });
+    }
+
+    // Label
+    const label = `${vn(obj.class_name)} ${Math.round((obj.confidence||0)*100)}%`;
+    ctxY.font = `${inRoi?'bold':'500'} 10px Inter,Arial`;
+    const tw = ctxY.measureText(label).width + 12;
+    const lx = Math.min(box.x1, W-tw-2);
+    const ly = Math.max(box.y1 - 20, 2);
+    ctxY.fillStyle = inRoi ? (color+'cc') : 'rgba(20,20,20,0.75)';
+    rrect(ctxY, lx, ly, tw, 17, 3); ctxY.fill();
+    ctxY.fillStyle = inRoi ? '#000' : '#aaa';
+    ctxY.fillText(label, lx+6, ly+12);
+
+    ctxY.restore();
+  });
+}
+
+/* ═══════════════════════════════════════════════════════
+   PANEL 2 – DEPTH MAP (heatmap from backend)
+═══════════════════════════════════════════════════════ */
+function renderDepth(depth, W, H) {
+  if (!depth.available || !depth.colormap_b64) {
+    depthUnavail.classList.remove('hidden');
+    const msg = document.getElementById('depthUnavailMsg');
+    if (depth.status === 'error' && depth.error) {
+      depthBadge.textContent = 'error';
+      depthPill.className = 'pill warn';
+      if (msg) msg.innerHTML = depth.error + '<br><span style="font-size:10px;opacity:.6">Kiểm tra terminal backend / pip install transformers torch Pillow</span>';
+    } else {
+      depthBadge.textContent = 'loading…';
+      depthPill.className = 'pill';
+      if (msg) msg.innerHTML = 'Đang tải Depth Anything V2 Small…<br><span style="font-size:10px;opacity:.6">~30-60s lần đầu, không chặn YOLO</span>';
+    }
+    return;
+  }
+
+  depthUnavail.classList.add('hidden');
+  depthPill.className = 'pill ok';
+  depthPill.innerHTML = '<div class="dot"></div>Depth OK';
+  const cached = depth.cached ? '⚡cached' : 'live';
+  depthBadge.textContent = cached;
+
+  const src = 'data:image/jpeg;base64,' + depth.colormap_b64;
+  depthImg.style.display = 'block';
+  depthImg.src = src;
+  const img = new Image();
+  img.onload = () => {
+    ctxD.clearRect(0, 0, W, H);
+    ctxD.drawImage(img, 0, 0, W, H);
+  };
+  img.src = src;
+}
+
+/* ═══════════════════════════════════════════════════════
+   PANEL 3 – FUSION (Central Processor)
+   - Static depth zone overlay (perspective)
+   - Grouped objects (clustered by backend) with depth-based colors
+   - Safe path corridor
+   - Navigation line (dynamic, avoids obstacles)
+   - Danger zones highlight
+═══════════════════════════════════════════════════════ */
+function renderFusion(objects, guidance, depth, W, H, topPrio, navigation) {
+  ctxF.clearRect(0, 0, W, H);
+
+  const vx = W / 2;
+  const vy = H * 0.35;  // vanishing point
+
+  // --- 1. Dark base (semi-transparent road view) ---
+  ctxF.fillStyle = 'rgba(3,6,9,0.55)';
+  ctxF.fillRect(0, 0, W, H);
+
+  // --- 2. Perspective corridor bands ---
+  drawFusionDepthZones(W, H, vx, vy, objects);
+
+  // --- 3. Navigation path (dynamic based on backend direction) ---
+  drawNavigationPath(W, H, vx, vy, objects, navigation);
+
+  // --- 4. Danger zones based on object positions ---
+  drawDangerOverlays(objects, W, H, topPrio);
+
+  // --- 5. Objects with fusion labels (grouped) ---
+  drawFusionObjects(objects, W, H);
+
+  // --- 6. HUD overlays ---
+  drawFusionHUD(W, H, vx, vy, topPrio, navigation);
+
+  // Badge
+  const criticalCount = objects.filter(o => o.in_roi && o.distance?.level === 'CRITICAL').length;
+  fusionBadge.textContent = criticalCount > 0 ? `⚠ ${criticalCount} CRITICAL` : `${objects.filter(o=>o.in_roi).length} in ROI`;
+  fusionBadge.style.background = criticalCount > 0 ? 'rgba(255,59,92,.2)' : 'rgba(0,230,118,.12)';
+  fusionBadge.style.borderColor = criticalCount > 0 ? 'rgba(255,59,92,.4)' : 'rgba(0,230,118,.3)';
+  fusionBadge.style.color = criticalCount > 0 ? 'var(--danger)' : 'var(--safe)';
+}
+
+function drawFusionDepthZones(W, H, vx, vy) {
+  const bands = [
+    { yB: H,       yT: H*0.85, color:[255,71,87],   alpha:0.18, label:'NGUY HIỂM <1m' },
+    { yB: H*0.85,  yT: H*0.70, color:[255,204,0],   alpha:0.14, label:'CHÚ Ý ~1-2m' },
+    { yB: H*0.70,  yT: H*0.57, color:[0,229,255],   alpha:0.10, label:'TRUNG BÌNH ~2-5m' },
+    { yB: H*0.57,  yT: H*0.45, color:[120,100,255],  alpha:0.08, label:'XA ~5-8m' },
+    { yB: H*0.45,  yT: vy,     color:[100,100,220],   alpha:0.06, label:'RẤT XA >8m' },
+  ];
+
+  bands.forEach(band => {
+    const tB = (band.yB-vy)/(H-vy), tT = (band.yT-vy)/(H-vy);
+    const hwB = (W*0.48)*tB, hwT = (W*0.48)*tT;
+    const [r,g,b] = band.color;
+
+    ctxF.beginPath();
+    ctxF.moveTo(vx-hwT, band.yT); ctxF.lineTo(vx+hwT, band.yT);
+    ctxF.lineTo(vx+hwB, band.yB); ctxF.lineTo(vx-hwB, band.yB);
+    ctxF.closePath();
+
+    const grad = ctxF.createLinearGradient(vx, band.yT, vx, band.yB);
+    grad.addColorStop(0, `rgba(${r},${g},${b},0)`);
+    grad.addColorStop(0.3, `rgba(${r},${g},${b},${band.alpha*0.5})`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},${band.alpha})`);
+    ctxF.fillStyle = grad;
+    ctxF.fill();
+
+    // Band boundary line - more visible
+    ctxF.strokeStyle = `rgba(${r},${g},${b},0.35)`;
+    ctxF.lineWidth = 1.2;
+    ctxF.setLineDash([6,8]);
+    ctxF.stroke();
+    ctxF.setLineDash([]);
+
+    // Band label - larger and clearer
+    ctxF.font = 'bold 8px Inter,Arial';
+    ctxF.fillStyle = `rgba(${r},${g},${b},0.75)`;
+    ctxF.textAlign = 'right';
+    ctxF.fillText(band.label, vx - hwT - 6, band.yT + 10);
+    ctxF.textAlign = 'left';
+  });
+}
+
+function drawNavigationPath(W, H, vx, vy, objects, navigation) {
+  // Use navigation direction from backend instead of calculating locally
+  const direction = navigation.direction || 'straight';
+  const confidence = navigation.confidence || 0.9;
+
+  // Map direction to path offset
+  let pathOffsetRatio = 0;
+  const safe = direction === 'straight';
+
+  if (direction === 'left') {
+    pathOffsetRatio = -0.45;
+  } else if (direction === 'right') {
+    pathOffsetRatio = 0.45;
+  } else if (direction === 'stop') {
+    pathOffsetRatio = 0;
+  }
+
+  const pathX = vx + pathOffsetRatio * W * 0.35;
+
+  // Safe corridor fill - wider and more visible
+  const corrW = W * 0.22;
+  ctxF.save();
+
+  // Dynamic gradient corridor with animation effect
+  const pathGrad = ctxF.createLinearGradient(pathX, vy, pathX, H);
+  if (safe) {
+    pathGrad.addColorStop(0, 'rgba(0,255,136,0)');
+    pathGrad.addColorStop(0.5, 'rgba(0,255,136,0.08)');
+    pathGrad.addColorStop(1, 'rgba(0,255,136,0.18)');
+  } else {
+    pathGrad.addColorStop(0, 'rgba(255,204,0,0)');
+    pathGrad.addColorStop(0.5, 'rgba(255,204,0,0.06)');
+    pathGrad.addColorStop(1, 'rgba(255,204,0,0.15)');
+  }
+
+  ctxF.beginPath();
+  ctxF.moveTo(vx, vy);
+  ctxF.lineTo(pathX - corrW, H);
+  ctxF.lineTo(pathX + corrW, H);
+  ctxF.closePath();
+  ctxF.fillStyle = pathGrad;
+  ctxF.fill();
+
+  // Add glow effect to path
+  ctxF.shadowColor = safe ? 'rgba(0,255,136,0.5)' : 'rgba(255,204,0,0.5)';
+  ctxF.shadowBlur = 15;
+
+  // Dynamic navigation line with better curve
+  ctxF.strokeStyle = safe ? 'rgba(0,255,136,0.85)' : 'rgba(255,204,0,0.75)';
+  ctxF.lineWidth   = 3.5;
+  ctxF.lineCap = 'round';
+  ctxF.lineJoin = 'round';
+
+  // Animate dash offset for movement effect
+  const time = Date.now() / 1000;
+  const dashOffset = time * 20;
+  ctxF.setLineDash([15, 10]);
+  ctxF.lineDashOffset = -dashOffset;
+
+  ctxF.beginPath();
+  ctxF.moveTo(vx, vy + 15);
+
+  // More natural bezier curve with control points
+  const cp1x = vx;
+  const cp1y = vy + (H-vy)*0.4;
+  const cp2x = pathX;
+  const cp2y = vy + (H-vy)*0.6;
+
+  ctxF.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, pathX, H);
+  ctxF.stroke();
+  ctxF.setLineDash([]);
+  ctxF.shadowBlur = 0;
+
+  // Large, clear arrow head
+  const arrY = H - 25;
+  const arrSize = 16;
+  const arrDX = (pathX - vx) * 0.7;
+
+  ctxF.fillStyle = safe ? 'rgba(0,255,136,0.95)' : 'rgba(255,204,0,0.9)';
+  ctxF.beginPath();
+  ctxF.moveTo(pathX + arrDX*0.15, arrY - arrSize);
+  ctxF.lineTo(pathX + arrDX*0.15 + arrSize, arrY + 5);
+  ctxF.lineTo(pathX + arrDX*0.15 - arrSize, arrY + 5);
+  ctxF.closePath();
+  ctxF.fill();
+
+  // Clear direction label with icon (simplified navigation guidance)
+  let dirLabel, dirIcon;
+  if (safe) {
+    dirLabel = 'Đi thẳng';
+    dirIcon = '↑';
+  } else if (direction === 'left') {
+    dirLabel = 'Rẽ trái';
+    dirIcon = '←';
+  } else if (direction === 'right') {
+    dirLabel = 'Rẽ phải';
+    dirIcon = '→';
+  } else if (direction === 'stop') {
+    dirLabel = 'Dừng lại';
+    dirIcon = '⬛';
+  }
+
+  ctxF.font = 'bold 14px Inter,Arial';
+  ctxF.fillStyle = safe ? 'rgba(0,255,136,0.95)' : 'rgba(255,204,0,0.9)';
+  ctxF.textAlign = 'center';
+  ctxF.shadowColor = ctxF.fillStyle;
+  ctxF.shadowBlur = 10;
+  ctxF.fillText(`${dirIcon} ${dirLabel}`, pathX + arrDX*0.15, arrY + 25);
+  ctxF.shadowBlur = 0;
+
+  // Vanishing point with glow
+  ctxF.beginPath();
+  ctxF.arc(vx, vy, 5, 0, Math.PI*2);
+  ctxF.fillStyle = 'rgba(0,229,255,0.9)';
+  ctxF.shadowColor = 'rgba(0,229,255,0.8)';
+  ctxF.shadowBlur = 12;
+  ctxF.fill();
+  ctxF.shadowBlur = 0;
+
+  // Horizon line - more visible
+  ctxF.strokeStyle = 'rgba(0,229,255,0.25)';
+  ctxF.lineWidth = 1.5;
+  ctxF.setLineDash([12,8]);
+  ctxF.beginPath(); ctxF.moveTo(0, vy); ctxF.lineTo(W, vy); ctxF.stroke();
+  ctxF.setLineDash([]);
+  ctxF.font = 'bold 9px Inter,Arial';
+  ctxF.fillStyle = 'rgba(0,229,255,0.5)';
+  ctxF.textAlign = 'center';
+  ctxF.fillText('HORIZON', vx, vy - 8);
+
+  ctxF.restore();
+}
+
+function drawDangerOverlays(objects, W, H, topPrio) {
+  // Highlight danger zones (left / center / right) based on object positions
+  const zones = {
+    left:   objects.filter(o => o.in_roi && o.position==='left'),
+    center: objects.filter(o => o.in_roi && o.position==='center'),
+    right:  objects.filter(o => o.in_roi && o.position==='right'),
+  };
+
+  const third = W/3;
+  const zoneRects = { left:[0,0,third,H], center:[third,0,third,H], right:[third*2,0,third,H] };
+
+  Object.entries(zones).forEach(([pos, objs]) => {
+    if (!objs.length) return;
+    const topLvl = objs.reduce((best, o) => {
+      const PRIO = {CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3,NONE:4};
+      return PRIO[o.distance?.level||'NONE'] < PRIO[best] ? o.distance.level : best;
+    }, 'NONE');
+
+    const [zx, zy, zw, zh] = zoneRects[pos];
+    const colors = { CRITICAL:[255,71,87], HIGH:[255,204,0], MEDIUM:[0,229,255], LOW:[0,255,136] };
+    const [r,g,b] = colors[topLvl] || [255,255,255];
+    const alpha   = topLvl==='CRITICAL' ? 0.2 : topLvl==='HIGH' ? 0.15 : 0.08;
+
+    ctxF.save();
+    const zGrad = ctxF.createLinearGradient(zx+zw/2, zy, zx+zw/2, zy+zh);
+    zGrad.addColorStop(0, `rgba(${r},${g},${b},0)`);
+    zGrad.addColorStop(0.5, `rgba(${r},${g},${b},${alpha*0.6})`);
+    zGrad.addColorStop(1, `rgba(${r},${g},${b},${alpha})`);
+    ctxF.fillStyle = zGrad;
+    ctxF.fillRect(zx, zy, zw, zh);
+
+    // Zone border - more visible
+    ctxF.strokeStyle = `rgba(${r},${g},${b},${topLvl==='CRITICAL'?0.6:0.35})`;
+    ctxF.lineWidth = topLvl==='CRITICAL' ? 2 : 1.5;
+    if (pos==='left') { ctxF.beginPath(); ctxF.moveTo(zx+zw,zy); ctxF.lineTo(zx+zw,zy+zh); ctxF.stroke(); }
+    else if (pos==='right') { ctxF.beginPath(); ctxF.moveTo(zx,zy); ctxF.lineTo(zx,zy+zh); ctxF.stroke(); }
+
+    // Zone label - larger and clearer
+    ctxF.font = 'bold 10px Inter,Arial';
+    ctxF.fillStyle = `rgba(${r},${g},${b},0.9)`;
+    ctxF.textAlign = 'center';
+    ctxF.shadowColor = `rgba(${r},${g},${b},0.8)`;
+    ctxF.shadowBlur = 8;
+    const posLabel = pos==='left'?'◀ TRÁI':pos==='right'?'PHẢI ▶':'⚠ TRƯỚC';
+    ctxF.fillText(`${posLabel} ${objs.length}`, zx+zw/2, zy+22);
+    ctxF.shadowBlur = 0;
+
+    ctxF.restore();
+  });
+}
+
+function drawFusionObjects(objects, W, H) {
+  // Draw clustered objects with depth-enriched labels
+  const PRIO = {CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3,NONE:4};
+  const sorted = [...objects].sort((a,b) => PRIO[a.distance?.level||'NONE'] - PRIO[b.distance?.level||'NONE']);
+
+  sorted.forEach(obj => {
+    const box  = obj.bounding_box;
+    if (!box) return;
+    const inRoi= !!obj.in_roi;
+    const dist = obj.distance || {};
+    const lvl  = dist.level || 'NONE';
+    if (!inRoi && lvl === 'NONE') return; // skip very far non-ROI
+
+    const colors = {
+      CRITICAL:'#ff4757', HIGH:'#ffcc00', MEDIUM:'#00e5ff', LOW:'#00ff88', NONE:'rgba(255,255,255,0.4)'
+    };
+    const color = colors[lvl];
+
+    const bw = box.x2-box.x1, bh = box.y2-box.y1;
+
+    ctxF.save();
+    if (inRoi) { ctxF.shadowColor = color; ctxF.shadowBlur = 18; }
+
+    // Box
+    ctxF.strokeStyle = color;
+    ctxF.lineWidth = inRoi ? 2.5 : 1.5;
+    ctxF.strokeRect(box.x1, box.y1, bw, bh);
+    ctxF.shadowBlur = 0;
+
+    // Fill (light tint for CRITICAL and HIGH)
+    if (lvl === 'CRITICAL' || lvl === 'HIGH') {
+      ctxF.fillStyle = lvl === 'CRITICAL' ? 'rgba(255,71,87,0.08)' : 'rgba(255,204,0,0.06)';
+      ctxF.fillRect(box.x1, box.y1, bw, bh);
+    }
+
+    // Corner brackets (ROI objects) - larger
+    if (inRoi) {
+      const cl = 12;
+      ctxF.lineWidth = 3;
+      [[box.x1,box.y1,1,1],[box.x2,box.y1,-1,1],[box.x1,box.y2,1,-1],[box.x2,box.y2,-1,-1]].forEach(([cx,cy,sx,sy])=>{
+        ctxF.beginPath(); ctxF.moveTo(cx,cy+sy*cl); ctxF.lineTo(cx,cy); ctxF.lineTo(cx+sx*cl,cy); ctxF.stroke();
+      });
+    }
+
+    // Ground contact dot - larger
+    if (inRoi) {
+      const gx=(box.x1+box.x2)/2, gy=box.y2;
+      ctxF.beginPath(); ctxF.arc(gx,gy,4,0,Math.PI*2);
+      ctxF.fillStyle = color; ctxF.fill();
+    }
+
+    // Fusion label (enriched: name + depth source + meters)
+    const cls   = obj.class_name;
+    const conf  = Math.round((obj.confidence||0)*100);
+    const depSrc= dist.source==='depth_ai' ? '🧠' : '📐';
+    const meters= dist.meters || '';
+    const depthV= obj.depth_value >= 0 ? ` d=${(obj.depth_value||0).toFixed(2)}` : '';
+    const label = inRoi
+      ? `${emo(cls)} ${vn(cls)}  ${meters} ${depSrc}${depthV}`
+      : `${vn(cls)} ${conf}%`;
+
+    ctxF.font = `${inRoi?'bold':'600'} ${inRoi?12:10}px Inter,Arial`;
+    const tw = ctxF.measureText(label).width + 16;
+    const lx = Math.min(box.x1, W-tw-2);
+    const ly = Math.max(box.y1 - 24, 2);
+
+    ctxF.fillStyle = inRoi ? (color+'dd') : 'rgba(20,20,30,0.8)';
+    rrect(ctxF, lx, ly, tw, 20, 5); ctxF.fill();
+    ctxF.fillStyle = inRoi ? '#000' : '#aaa';
+    ctxF.fillText(label, lx+8, ly+14);
+
+    ctxF.restore();
+  });
+}
+
+function drawFusionHUD(W, H, vx, vy, topPrio, navigation) {
+  // Zone labels bottom - clearer
+  ctxF.save();
+  ctxF.font = 'bold 10px Inter,Arial';
+  ctxF.textAlign = 'center';
+  const laneY = H * 0.82;
+  ctxF.fillStyle = 'rgba(255,71,87,0.7)';
+  ctxF.fillText('◀ TRÁI', W*0.17, laneY);
+  ctxF.fillStyle = 'rgba(255,204,0,0.7)';
+  ctxF.fillText('TRƯỚC', vx, laneY);
+  ctxF.fillStyle = 'rgba(0,255,136,0.7)';
+  ctxF.fillText('PHẢI ▶', W*0.83, laneY);
+
+  // Top status - show navigation direction instead of danger level
+  const directionLabels = {
+    'straight': '↑ ĐI THẲNG',
+    'left': '← RẼ TRÁI',
+    'right': '→ RẼ PHẢI',
+    'stop': '⬛ DỪNG LẠI'
+  };
+  const directionColors = {
+    'straight': 'rgba(0,255,136,0.9)',
+    'left': 'rgba(255,204,0,0.9)',
+    'right': 'rgba(255,204,0,0.9)',
+    'stop': 'rgba(255,71,87,0.9)'
+  };
+
+  const dir = navigation.direction || 'straight';
+  ctxF.font = 'bold 14px Inter,Arial';
+  ctxF.fillStyle = directionColors[dir] || directionColors['straight'];
+  ctxF.textAlign = 'center';
+  ctxF.shadowColor = ctxF.fillStyle;
+  ctxF.shadowBlur = 12;
+  ctxF.fillText(directionLabels[dir] || directionLabels['straight'], vx, vy - 16);
+  ctxF.shadowBlur = 0;
+
+  ctxF.restore();
+}
+
+/* ═══════════════════════════════════════════════════════
+   BOTTOM UI UPDATE
+═══════════════════════════════════════════════════════ */
+function updateBottom(objects, nL, nC, nR, nDanger, topPrio, guidance) {
+  statTotal.textContent  = objects.length;
+  statDanger.textContent = nDanger;
+  cntL.textContent = nL; cntC.textContent = nC; cntR.textContent = nR;
+
+  const zClass = n => n >= 2 ? 'zone-card danger' : (n === 1 ? 'zone-card warn' : 'zone-card');
+  zL.className = zClass(nL);
+  zC.className = nC > 0 ? 'zone-card danger' : 'zone-card';
+  zR.className = zClass(nR);
+
+  // Priority bar
+  const pct = {CRITICAL:100,HIGH:75,MEDIUM:45,LOW:20,NONE:5}[topPrio] || 0;
+  prioBar.style.width = pct + '%';
+  prioBar.className   = 'prio-bar-fill ' + topPrio;
+
+  // Guidance card
+  if (guidance?.text) {
+    const p = guidance.priority || topPrio;
+    guidCard.className     = 'guidance-card ' + p;
+    guidText.className     = 'guidance-text '  + p;
+    guidText.textContent   = guidance.text;
+    guidMeta.textContent   = `priority: ${p} · ${guidance.text.length} chars`;
+    showFusionBanner(guidance.text, p, guidance.audio_base64 || '');
+  }
+
+  // Object chips (horizontal scroll)
+  if (!objects.length) {
+    objScroll.innerHTML = '<div style="font-size:10px;color:var(--muted);padding:8px">Không phát hiện vật thể</div>';
+    return;
+  }
+  const PRIO = {CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3,NONE:4};
+  const sorted = [...objects].sort((a,b)=>(PRIO[a.distance?.level||'NONE'])-(PRIO[b.distance?.level||'NONE']));
+  objScroll.innerHTML = sorted.map(obj => {
+    const cls  = obj.class_name;
+    const dist = obj.distance || {};
+    const lvl  = dist.level || 'NONE';
+    const inRoi= !!obj.in_roi;
+    const dc   = LEVEL_DCLASS[lvl] || 'dn';
+    const roiCls = inRoi ? (lvl==='CRITICAL'||lvl==='HIGH' ? 'in-roi' : 'in-roi-warn') : '';
+    const depSrc = dist.source==='depth_ai' ? '🧠' : '📐';
+    return `<div class="obj-chip ${roiCls}">
+      <span class="obj-chip-emo">${emo(cls)}</span>
+      <div>
+        <div class="obj-chip-name">${vn(cls)}</div>
+        <div style="font-size:8px;opacity:.4">${vnpos(obj.position)} ${depSrc}</div>
+      </div>
+      <span class="obj-chip-dist ${dc}">${dist.meters||'?'}</span>
+    </div>`;
+  }).join('');
+
+  log(`${objects.length} obj · ${nDanger} ROI · prio:${topPrio}`, nDanger > 0 ? 'warn' : 'ok');
+}
+
+/* ═══════════════════════════════════════════════════════
+   GUIDANCE BANNER (on Fusion panel)
+═══════════════════════════════════════════════════════ */
+function showFusionBanner(text, priority, audioBase64) {
+  const now = Date.now();
+
+  // AUDIO: Luôn phát nếu có audio_base64 mới và đủ cooldown
+  // (audio có thể đến ở frame sau text, không phụ thuộc text dedup)
+  if (audioBase64 && audioBase64.length > 0 && now - lastPlayTime >= MIN_PLAY_INTERVAL) {
+    playAudio(audioBase64);
+    lastPlayTime = now;
+
+    // Reset conversation timer khi trả lời (để người dùng nghe xong)
+    if (currentMode === 'CONVERSATION') {
+      clearTimeout(conversationTimer);
+      conversationTimer = setTimeout(() => {
+        if (currentMode === 'CONVERSATION') {
+          switchToNavigationMode();
+          log('Auto: Quay lại NAVIGATION mode (sau khi trả lời)', 'info');
         }
-    </script>
+      }, CONVERSATION_TIMEOUT);
+    }
+  }
+
+  // VISUAL BANNER: Chỉ cập nhật nếu text hoặc priority thay đổi
+  if (text === lastGuidance && priority === lastPriority) return;
+  lastGuidance = text; lastPriority = priority;
+
+  clearTimeout(guidanceTimer);
+  fusionBannerEl.className = `show ${priority || ''}`;
+  fusionBannerEl.textContent = text;
+
+  guidanceTimer = setTimeout(() => {
+    fusionBannerEl.classList.remove('show');
+    setTimeout(() => { lastGuidance = ''; }, 550);
+  }, 5500);
+}
+
+/* ═══════════════════════════════════════════════════════
+   AUDIO
+═══════════════════════════════════════════════════════ */
+function playAudio(b64) {
+  try {
+    // Stop any currently playing audio
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.onended = null;
+      currentAudio.onerror = null;
+      currentAudio = null;
+    }
+
+    // Ensure AudioContext is active
+    if (audioContext && audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+
+    const blob = b64ToBlob(b64, 'audio/mpeg');
+    const url  = URL.createObjectURL(blob);
+    currentAudio = new Audio(url);
+    currentAudio.volume = 1.0;
+    currentAudio.playbackRate = 1.0;
+
+    currentAudio.onended = () => {
+      URL.revokeObjectURL(url);
+      currentAudio = null;
+      updateAudioStatus('unlocked', 'Audio đã kích hoạt ✓');
+    };
+
+    currentAudio.onerror = (e) => {
+      log('Audio mpeg lỗi, thử wav...', 'warn');
+      URL.revokeObjectURL(url);
+      // Fallback: try as wav
+      const wb = b64ToBlob(b64, 'audio/wav');
+      const wu = URL.createObjectURL(wb);
+      const fallback = new Audio(wu);
+      fallback.volume = 1;
+      fallback.onended = () => {
+        URL.revokeObjectURL(wu);
+        currentAudio = null;
+        updateAudioStatus('unlocked', 'Audio đã kích hoạt ✓');
+      };
+      fallback.play().catch(() => {
+        updateAudioStatus('unlocked', 'Audio lỗi phát');
+      });
+      currentAudio = fallback;
+    };
+
+    const playPromise = currentAudio.play();
+    if (playPromise !== undefined) {
+      playPromise.then(() => {
+        updateAudioStatus('playing', 'Đang phát hướng dẫn…');
+        log('🔊 Đang phát audio hướng dẫn', 'ok');
+      }).catch(error => {
+        log('⚠ Audio bị chặn: ' + error.message, 'warn');
+        updateAudioStatus('unlocked', 'Audio bị chặn - nhấn Test Audio');
+        // Auto-retry: unlock then play
+        unlockAudio().then(() => {
+          if (currentAudio) {
+            currentAudio.play().then(() => {
+              updateAudioStatus('playing', 'Đang phát hướng dẫn…');
+              log('🔊 Retry phát audio OK', 'ok');
+            }).catch(() => {
+              log('⚠ Retry phát audio thất bại', 'err');
+            });
+          }
+        });
+      });
+    }
+  } catch(e) {
+    log('Lỗi phát audio: ' + e, 'err');
+  }
+}
+function b64ToBlob(b64, mime) {
+  const bstr = atob(b64); const arr = new Uint8Array(bstr.length);
+  for (let i=0; i<bstr.length; i++) arr[i] = bstr.charCodeAt(i);
+  return new Blob([arr], {type: mime});
+}
+
+/* ═══════════════════════════════════════════════════════
+   ALERT FLASH
+═══════════════════════════════════════════════════════ */
+function doFlash(prio) {
+  clearTimeout(flashTimer);
+  if (prio==='CRITICAL') { alertFlash.className='danger'; flashTimer=setTimeout(()=>{alertFlash.className=''},200); }
+  else if (prio==='HIGH') { alertFlash.className='warn';  flashTimer=setTimeout(()=>{alertFlash.className=''},200); }
+  else alertFlash.className='';
+}
+
+/* ═══════════════════════════════════════════════════════
+   THREE.JS 3D SCENE
+═══════════════════════════════════════════════════════ */
+function initThreeJS() {
+  const container = document.getElementById('threeContainer');
+  if (!container || typeof THREE === 'undefined') return;
+
+  // Scene
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0e17);
+  scene.fog = new THREE.Fog(0x0a0e17, 10, 50);
+
+  // Camera
+  camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 100);
+  camera.position.set(0, 8, 12);
+  camera.lookAt(0, 0, 0);
+
+  // Renderer
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  container.appendChild(renderer.domElement);
+
+  // Lights
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+  scene.add(ambientLight);
+
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  directionalLight.position.set(5, 10, 5);
+  scene.add(directionalLight);
+
+  // Ground (road)
+  const groundGeometry = new THREE.PlaneGeometry(20, 40);
+  const groundMaterial = new THREE.MeshStandardMaterial({
+    color: 0x1a2235,
+    roughness: 0.8
+  });
+  const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = 0;
+  scene.add(ground);
+
+  // Grid helper
+  const gridHelper = new THREE.GridHelper(20, 20, 0x00d4ff, 0x242e45);
+  gridHelper.position.y = 0.01;
+  scene.add(gridHelper);
+
+  // User position (cone)
+  const userGeometry = new THREE.ConeGeometry(0.5, 1.5, 8);
+  const userMaterial = new THREE.MeshStandardMaterial({
+    color: 0x00ff88,
+    emissive: 0x00ff88,
+    emissiveIntensity: 0.3
+  });
+  const user = new THREE.Mesh(userGeometry, userMaterial);
+  user.position.set(0, 0.75, 5);
+  user.rotation.x = Math.PI;
+  scene.add(user);
+
+  // Safe path line
+  const pathGeometry = new THREE.BufferGeometry();
+  const pathMaterial = new THREE.LineBasicMaterial({
+    color: 0x00ff88,
+    linewidth: 3
+  });
+  pathLine = new THREE.Line(pathGeometry, pathMaterial);
+  scene.add(pathLine);
+
+  // Navigation arrow
+  const arrowGeometry = new THREE.ConeGeometry(0.3, 0.8, 8);
+  const arrowMaterial = new THREE.MeshStandardMaterial({
+    color: 0x00ff88,
+    emissive: 0x00ff88,
+    emissiveIntensity: 0.5
+  });
+  pathArrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
+  pathArrow.position.set(0, 0.5, 0);
+  pathArrow.rotation.x = -Math.PI / 2;
+  scene.add(pathArrow);
+
+  // Resize handler
+  window.addEventListener('resize', () => {
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    renderer.setSize(width, height);
+  });
+
+  // Animation loop
+  animateThreeJS();
+}
+
+function animateThreeJS() {
+  requestAnimationFrame(animateThreeJS);
+  if (renderer && scene && camera) {
+    // Rotate arrow based on direction
+    if (pathArrow) {
+      if (navDirection === 'left') {
+        pathArrow.rotation.z = Math.PI / 4;
+        pathArrow.position.x = -2;
+      } else if (navDirection === 'right') {
+        pathArrow.rotation.z = -Math.PI / 4;
+        pathArrow.position.x = 2;
+      } else if (navDirection === 'stop') {
+        pathArrow.rotation.z = Math.PI;
+        pathArrow.material.color.setHex(0xff4757);
+        pathArrow.material.emissive.setHex(0xff4757);
+      } else {
+        pathArrow.rotation.z = 0;
+        pathArrow.position.x = 0;
+        pathArrow.material.color.setHex(0x00ff88);
+        pathArrow.material.emissive.setHex(0x00ff88);
+      }
+    }
+    renderer.render(scene, camera);
+  }
+}
+
+function update3DScene(objects, navigation) {
+  if (!scene || !renderer) return;
+
+  // Update navigation direction
+  navDirection = navigation.direction || 'straight';
+
+  // Clear old objects
+  threeObjects.forEach(obj => scene.remove(obj));
+  threeObjects = [];
+
+  // Add objects as 3D boxes
+  objects.forEach(obj => {
+    if (!obj.in_roi) return;
+
+    const box = obj.bounding_box;
+    if (!box) return;
+
+    const dist = obj.distance || {};
+    const level = dist.level || 'NONE';
+
+    // Map 2D position to 3D
+    const posX = (obj.position === 'left' ? -3 : obj.position === 'right' ? 3 : 0);
+    const posZ = -((dist.depth_zone || 3) * 3); // depth_zone 1=near, 5=far
+
+    // Color based on danger level
+    const colors = {
+      CRITICAL: 0xff4757,
+      HIGH: 0xffcc00,
+      MEDIUM: 0x00d4ff,
+      LOW: 0x00ff88,
+      NONE: 0x888888
+    };
+    const color = colors[level] || 0x888888;
+
+    // Create box
+    const geometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+    const material = new THREE.MeshStandardMaterial({
+      color: color,
+      emissive: color,
+      emissiveIntensity: level === 'CRITICAL' ? 0.5 : 0.2,
+      transparent: true,
+      opacity: 0.8
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(posX, 0.75, posZ);
+    scene.add(mesh);
+    threeObjects.push(mesh);
+
+    // Add edge lines
+    const edges = new THREE.EdgesGeometry(geometry);
+    const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+    const wireframe = new THREE.LineSegments(edges, lineMaterial);
+    wireframe.position.copy(mesh.position);
+    scene.add(wireframe);
+    threeObjects.push(wireframe);
+  });
+
+  // Update path line
+  if (pathLine) {
+    const points = [];
+    const startX = navDirection === 'left' ? -2 : navDirection === 'right' ? 2 : 0;
+    points.push(new THREE.Vector3(0, 0.1, 5)); // Start (user position)
+    points.push(new THREE.Vector3(startX, 0.1, 0)); // End
+    pathLine.geometry.setFromPoints(points);
+  }
+}
+
+// Initialize Three.js when page loads
+if (typeof THREE !== 'undefined') {
+  setTimeout(initThreeJS, 1000);
+}
+
+/* ═══════════════════════════════════════════════════════
+   UTILS
+═══════════════════════════════════════════════════════ */
+function rrect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x+r,y); c.lineTo(x+w-r,y); c.arcTo(x+w,y,x+w,y+r,r);
+  c.lineTo(x+w,y+h-r); c.arcTo(x+w,y+h,x+w-r,y+h,r);
+  c.lineTo(x+r,y+h); c.arcTo(x,y+h,x,y+h-r,r);
+  c.lineTo(x,y+r); c.arcTo(x,y,x+r,y,r);
+  c.closePath();
+}
+</script>
 </body>
 </html>

@@ -4,7 +4,12 @@ from ultralytics import YOLO
 
 # Tải model ở ngoài hàm để nó chỉ load 1 lần khi bật server, không load lại mỗi khi có request
 print("Đang khởi tạo model YOLO...")
-model = YOLO('yolov8n.pt')
+try:
+    model = YOLO('yolov8n.pt')
+    print("✓ Model YOLO loaded successfully")
+except Exception as e:
+    print(f"✗ Lỗi load YOLO model: {e}")
+    model = None
 
 def run_inference(image_bytes: bytes):
     """
@@ -21,7 +26,7 @@ def run_inference(image_bytes: bytes):
     height, width, _ = img.shape
     
     # Chạy YOLO
-    results = model(img)
+    results = model.predict(img, verbose=False, conf=0.15, imgsz=640)
     
     detections = []
     for result in results:
@@ -43,7 +48,7 @@ def run_inference(image_bytes: bytes):
                 }
             })
             
-    return detections, width
+    return detections, width, height
 
 
 def run_tracking(image_bytes: bytes):
@@ -59,8 +64,14 @@ def run_tracking(image_bytes: bytes):
         
     height, width, _ = img.shape
     
-    # Chạy YOLO Tracking
-    results = model.track(img, persist=True, tracker="bytetrack.yaml", verbose=False)
+    # Tracking để giữ ID; nếu frame lẻ không track được thì fallback detect
+    results = model.track(
+        img, persist=True, tracker="bytetrack.yaml",
+        verbose=False, conf=0.25, iou=0.5, imgsz=640,
+    )
+    has_boxes = any(r.boxes is not None and len(r.boxes) > 0 for r in results)
+    if not has_boxes:
+        results = model.predict(img, verbose=False, conf=0.15, imgsz=640)
     
     detections = []
     # Ở đây chúng ta có thể mở rộng lấy thêm ID của vật thể (result.boxes.id)
