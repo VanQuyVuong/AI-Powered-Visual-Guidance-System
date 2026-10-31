@@ -58,6 +58,15 @@ def demo_page():
     return FileResponse(html, media_type="text/html")
 
 
+@app.get("/view-phone")
+def view_phone_stream():
+    """Mở trang xem stream từ điện thoại tại http://localhost:8000/view-phone"""
+    html = BACKEND_DIR / "view_phone_stream.html"
+    if not html.is_file():
+        raise HTTPException(404, "Khong tim thay view_phone_stream.html")
+    return FileResponse(html, media_type="text/html")
+
+
 @app.get("/demo/bus.jpg")
 def demo_bus_image():
     img = BACKEND_DIR / "bus.jpg"
@@ -282,16 +291,61 @@ async def answer_user_question(qa_data: dict):
 # WEBSOCKET CHO REAL-TIME VIDEO TRACKING
 # ==========================================
 
+# Connection manager để hỗ trợ nhiều client
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+        self.latest_result = None  # Lưu kết quả mới nhất
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        print(f"📱 Client kết nối. Tổng: {len(self.active_connections)}")
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+        print(f"📱 Client ngắt kết nối. Tổng: {len(self.active_connections)}")
+
+    async def broadcast(self, message: dict):
+        """Gửi kết quả đến tất cả client"""
+        self.latest_result = message
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                print(f"Lỗi gửi đến client: {e}")
+
+manager = ConnectionManager()
+
 @app.websocket("/api/v1/vision/stream")
 async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    print("📱 Client đã kết nối tới Video Stream!")
-    frame_i = 0
+    await manager.connect(websocket)
     try:
+        # Nếu có kết quả mới nhất, gửi ngay cho client mới
+        if manager.latest_result:
+            await websocket.send_json(manager.latest_result)
+
+        frame_i = 0
         while True:
             try:
                 # 1. Nhận frame ảnh từ App (dạng chuỗi base64)
-                data = await websocket.receive_text()
+                # Timeout 1s để có thể broadcast kết quả mới nhất cho viewer
+                try:
+                    data = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    # Timeout = không có data từ phone, chỉ broadcast kết quả mới nhất nếu có
+                    if manager.latest_result:
+                        await websocket.send_json(manager.latest_result)
+                    continue
+
+                # Nếu client chỉ muốn xem (không gửi video)
+                if data == "VIEW_ONLY":
+                    # Client này chỉ xem, gửi kết quả mới nhất liên tục
+                    while True:
+                        if manager.latest_result:
+                            await websocket.send_json(manager.latest_result)
+                        await asyncio.sleep(0.1)
+
                 if data.startswith("data:") and "," in data:
                     data = data.split(",", 1)[1]
                 image_bytes = base64.b64decode(data)
@@ -347,14 +401,23 @@ async def websocket_endpoint(websocket: WebSocket):
                         guidance_data["text"] = "Đang đi đúng vạch dẫn đường."
                         guidance_data["priority"] = "LOW"
 
-                # 7. Gửi kết quả về FE (bao gồm depth colormap và navigation direction)
-                await websocket.send_json({
+                # 7. Convert frame ảnh sang base64 để gửi về web
+                import cv2
+                import numpy as np
+                img_array = np.frombuffer(image_bytes, dtype=np.uint8)
+                img_cv2 = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                _, buffer = cv2.imencode('.jpg', img_cv2, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                frame_b64 = base64.b64encode(buffer).decode('utf-8')
+
+                # 8. Gửi kết quả về TẤT CẢ client (broadcast)
+                result = {
                     "success":    True,
                     "mode":       get_mode(),
                     "objects":    objects_payload,
                     "guidance":   guidance_data,
                     "navigation": nav_direction,
                     "frame_meta": {"width": img_width, "height": img_height},
+                    "frame_b64":  frame_b64,
                     "depth": {
                         "available":     depth_ok,
                         "colormap_b64":  depth_b64,
@@ -362,17 +425,19 @@ async def websocket_endpoint(websocket: WebSocket):
                         "error":         depth_result.get("error"),
                         "status":        depth_result.get("status"),
                     }
-                })
+                }
+                await manager.broadcast(result)
             except Exception as frame_error:
                 print(f"[YOLO] frame error: {frame_error}")
                 await websocket.send_json({
                     "success": False,
                     "error": str(frame_error)
                 })
-                
+
     except WebSocketDisconnect:
-        print("📱 Client đã ngắt kết nối.")
+        manager.disconnect(websocket)
     except Exception as e:
+        manager.disconnect(websocket)
         print(f"❌ Lỗi WebSocket: {e}")
 
 # Dành cho việc chạy Backend

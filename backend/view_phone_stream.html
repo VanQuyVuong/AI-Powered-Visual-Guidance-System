@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Xem Kết Quả Từ Điện Thoại</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'Inter', sans-serif;
+    background: #0a0e17;
+    color: #fff;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+.header {
+    padding: 20px 30px;
+    background: linear-gradient(135deg, rgba(10,14,23,0.98) 0%, rgba(18,24,38,0.95) 100%);
+    border-bottom: 1px solid rgba(0,229,255,0.2);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.header h1 {
+    font-size: 24px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #fff 20%, #00e5ff 60%, #0066ff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #ff4757;
+    transition: all 0.3s;
+}
+.status-dot.connected {
+    background: #00ff88;
+    box-shadow: 0 0 20px rgba(0,255,136,0.5);
+}
+.status-text {
+    font-size: 14px;
+    color: rgba(255,255,255,0.6);
+}
+.status-text.connected {
+    color: #00ff88;
+}
+.main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    padding: 20px;
+}
+.panel {
+    background: #121826;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+}
+.panel-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #00e5ff;
+    margin-bottom: 16px;
+}
+.video-container {
+    flex: 1;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.video-container img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+.video-placeholder {
+    color: rgba(255,255,255,0.3);
+    font-size: 14px;
+    text-align: center;
+}
+.depth-container {
+    flex: 1;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.depth-container img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+.info-panel {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+}
+.guidance-box {
+    background: rgba(0,229,255,0.06);
+    border: 1px solid rgba(0,229,255,0.2);
+    border-radius: 12px;
+    padding: 20px;
+}
+.guidance-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 8px;
+}
+.guidance-text {
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.4;
+    color: #fff;
+}
+.guidance-text.CRITICAL { color: #ff4757; }
+.guidance-text.HIGH { color: #ffcc00; }
+.guidance-text.MEDIUM { color: #00e5ff; }
+.objects-box {
+    background: #121826;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 20px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.object-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 8px;
+    font-size: 13px;
+}
+.object-item.danger {
+    background: rgba(255,71,87,0.15);
+    border: 1px solid rgba(255,71,87,0.3);
+}
+.object-name {
+    font-weight: 600;
+}
+.object-info {
+    color: rgba(255,255,255,0.5);
+    font-size: 11px;
+}
+.navigation-box {
+    background: rgba(0,255,136,0.06);
+    border: 1px solid rgba(0,255,136,0.2);
+    border-radius: 12px;
+    padding: 20px;
+}
+.nav-direction {
+    font-size: 24px;
+    font-weight: 800;
+    color: #00ff88;
+    margin-bottom: 8px;
+}
+.nav-desc {
+    font-size: 14px;
+    color: rgba(255,255,255,0.7);
+}
+.controls {
+    padding: 20px 30px;
+    background: #121826;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    display: flex;
+    gap: 12px;
+}
+.btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+.btn-primary {
+    background: linear-gradient(135deg, #00e5ff 0%, #0066ff 100%);
+    color: #000;
+}
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(0,229,255,0.3);
+}
+.btn-secondary {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: #fff;
+}
+.btn-secondary:hover {
+    background: rgba(255,255,255,0.12);
+}
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+}
+.log-panel {
+    grid-column: 1 / -1;
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 16px;
+    max-height: 150px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.8;
+    color: rgba(255,255,255,0.4);
+}
+.log-entry {
+    margin-bottom: 4px;
+}
+.log-entry.info { color: #00e5ff; }
+.log-entry.success { color: #00ff88; }
+.log-entry.error { color: #ff4757; }
+</style>
+</head>
+<body>
+<div class="header">
+    <h1>📱 Xem Kết Quả Từ Điện Thoại</h1>
+    <div class="status">
+        <div class="status-dot" id="statusDot"></div>
+        <div class="status-text" id="statusText">Chưa kết nối</div>
+    </div>
+</div>
+
+<div class="main">
+    <div class="panel">
+        <div class="panel-title">📹 Video từ điện thoại</div>
+        <div class="video-container" id="videoContainer">
+            <div class="video-placeholder">
+                Chờ điện thoại gửi video...<br>
+                <small>Đảm bảo điện thoại đã kết nối và gửi stream</small>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-title">🔮 Depth Map</div>
+        <div class="depth-container" id="depthContainer">
+            <div class="video-placeholder">
+                Chờ dữ liệu depth...
+            </div>
+        </div>
+    </div>
+
+    <div class="info-panel">
+        <div class="guidance-box">
+            <div class="guidance-label">📢 Hướng dẫn</div>
+            <div class="guidance-text" id="guidanceText">Chờ dữ liệu...</div>
+        </div>
+
+        <div class="navigation-box">
+            <div class="guidance-label">🧭 Điều hướng</div>
+            <div class="nav-direction" id="navDirection">--</div>
+            <div class="nav-desc" id="navDesc">Chờ dữ liệu...</div>
+        </div>
+
+        <div class="objects-box">
+            <div class="guidance-label">🎯 Vật cản</div>
+            <div id="objectsList">
+                <div style="color: rgba(255,255,255,0.3); font-size: 12px;">Chờ dữ liệu...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="log-panel" id="logPanel">
+        <div class="log-entry info">[INFO] Giao diện đã sẵn sàng. Nhấn "Kết nối" để bắt đầu.</div>
+    </div>
+</div>
+
+<div class="controls">
+    <button class="btn btn-primary" id="connectBtn" onclick="toggleConnection()">Kết nối</button>
+    <button class="btn btn-secondary" onclick="clearLog()">Xóa log</button>
+</div>
+
+<script>
+let ws = null;
+let isConnected = false;
+let frameCount = 0;
+
+function log(message, type = 'info') {
+    const logPanel = document.getElementById('logPanel');
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    const time = new Date().toLocaleTimeString();
+    entry.textContent = `[${time}] ${message}`;
+    logPanel.appendChild(entry);
+    logPanel.scrollTop = logPanel.scrollHeight;
+}
+
+function clearLog() {
+    document.getElementById('logPanel').innerHTML = '';
+    log('Đã xóa log', 'info');
+}
+
+function updateStatus(connected) {
+    const dot = document.getElementById('statusDot');
+    const text = document.getElementById('statusText');
+    const btn = document.getElementById('connectBtn');
+
+    if (connected) {
+        dot.classList.add('connected');
+        text.classList.add('connected');
+        text.textContent = 'Đã kết nối';
+        btn.textContent = 'Ngắt kết nối';
+    } else {
+        dot.classList.remove('connected');
+        text.classList.remove('connected');
+        text.textContent = 'Chưa kết nối';
+        btn.textContent = 'Kết nối';
+    }
+}
+
+function toggleConnection() {
+    if (isConnected) {
+        disconnect();
+    } else {
+        connect();
+    }
+}
+
+function connect() {
+    const wsUrl = `ws://${window.location.host}/api/v1/vision/stream`;
+    log(`Đang kết nối đến ${wsUrl}...`, 'info');
+
+    try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+            isConnected = true;
+            updateStatus(true);
+            log('Đã kết nối WebSocket thành công!', 'success');
+            // Gửi VIEW_ONLY để báo rằng client này chỉ xem, không gửi video
+            ws.send('VIEW_ONLY');
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            frameCount++;
+
+            if (frameCount % 30 === 1) {
+                log(`Nhận frame #${frameCount} - ${data.objects?.length || 0} objects`, 'info');
+            }
+
+            // Update video frame
+            if (data.frame_b64) {
+                const videoContainer = document.getElementById('videoContainer');
+                videoContainer.innerHTML = `<img src="data:image/jpeg;base64,${data.frame_b64}" alt="Video Frame">`;
+            }
+
+            // Update guidance
+            if (data.guidance && data.guidance.text) {
+                const guidanceEl = document.getElementById('guidanceText');
+                guidanceEl.textContent = data.guidance.text;
+                guidanceEl.className = `guidance-text ${data.guidance.priority || 'MEDIUM'}`;
+            }
+
+            // Update navigation
+            if (data.navigation) {
+                document.getElementById('navDirection').textContent = data.navigation.direction || '--';
+                document.getElementById('navDesc').textContent = data.navigation.description || 'Chờ dữ liệu...';
+            }
+
+            // Update objects list
+            if (data.objects && data.objects.length > 0) {
+                const objectsList = document.getElementById('objectsList');
+                objectsList.innerHTML = '';
+                data.objects.slice(0, 10).forEach(obj => {
+                    const item = document.createElement('div');
+                    item.className = `object-item ${obj.in_roi ? 'danger' : ''}`;
+                    item.innerHTML = `
+                        <span class="object-name">${obj.class_name}</span>
+                        <span class="object-info">${obj.position} | ${obj.distance?.level || 'N/A'}</span>
+                    `;
+                    objectsList.appendChild(item);
+                });
+            }
+
+            // Update depth if available
+            if (data.depth && data.depth.colormap_b64) {
+                const depthContainer = document.getElementById('depthContainer');
+                depthContainer.innerHTML = `<img src="data:image/jpeg;base64,${data.depth.colormap_b64}" alt="Depth Map">`;
+            }
+        };
+
+        ws.onerror = (error) => {
+            log('Lỗi WebSocket: ' + error, 'error');
+        };
+
+        ws.onclose = () => {
+            isConnected = false;
+            updateStatus(false);
+            log('Đã ngắt kết nối', 'info');
+        };
+    } catch (error) {
+        log('Lỗi kết nối: ' + error.message, 'error');
+    }
+}
+
+function disconnect() {
+    if (ws) {
+        ws.close();
+        ws = null;
+    }
+    isConnected = false;
+    updateStatus(false);
+}
+
+// Auto-connect on load (optional)
+// window.onload = () => connect();
+</script>
+</body>
+</html>
