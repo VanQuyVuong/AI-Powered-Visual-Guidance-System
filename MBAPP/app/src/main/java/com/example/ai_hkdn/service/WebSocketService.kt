@@ -26,6 +26,7 @@ class WebSocketService(
 ) {
     private val tag = "WebSocketService"
     private val gson = Gson()
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val client = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
@@ -56,7 +57,7 @@ class WebSocketService(
             Request.Builder().url(serverUrl).build()
         } catch (e: Exception) {
             setStatus(ConnectionStatus.ERROR)
-            onError("URL Server không hợp lệ: ${e.message}")
+            mainHandler.post { onError("URL Server không hợp lệ: ${e.message}") }
             return
         }
 
@@ -74,7 +75,9 @@ class WebSocketService(
                 try {
                     val visionResponse = gson.fromJson(text, VisionResponse::class.java)
                     if (visionResponse != null) {
-                        onResult(visionResponse, latency)
+                        mainHandler.post {
+                            onResult(visionResponse, latency)
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(tag, "Lỗi giải mã JSON phản hồi: ${e.message}")
@@ -95,7 +98,9 @@ class WebSocketService(
                 Log.e(tag, "❌ Lỗi WebSocket: ${t.message}")
                 setStatus(ConnectionStatus.ERROR)
                 isWaitingForResponse.set(false)
-                onError("Mất kết nối tới Server AI: ${t.localizedMessage ?: "Timeout"}")
+                mainHandler.post {
+                    onError("Mất kết nối tới Server AI: ${t.localizedMessage ?: "Timeout"}")
+                }
             }
         })
     }
@@ -140,6 +145,6 @@ class WebSocketService(
 
     private fun setStatus(newStatus: ConnectionStatus) {
         status = newStatus
-        onStatusChange(newStatus)
+        mainHandler.post { onStatusChange(newStatus) }
     }
 }

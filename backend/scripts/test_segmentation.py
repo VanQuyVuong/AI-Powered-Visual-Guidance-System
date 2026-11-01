@@ -4,11 +4,10 @@ import os
 
 def test_segmentation():
     print("Đang tải model YOLOv8 Segmentation (Phân mảng)...")
-    # Sử dụng mô hình '-seg' thay vì bản thường
-    model = YOLO('yolov8n-seg.pt')
-    
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(current_dir)
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(scripts_dir))
+    model_path = os.path.join(project_root, "yolov8n-seg.pt")
+    model = YOLO(model_path if os.path.exists(model_path) else 'yolov8n-seg.pt')
     
     # Bạn có thể đổi thành ảnh chụp vỉa hè / đường phố để test
     input_image = os.path.join(project_root, "test_images", "sample.jpg")

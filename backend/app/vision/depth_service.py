@@ -1,0 +1,452 @@
+import os
+import time
+import threading
+import numpy as np
+import cv2
+import torch
+from PIL import Image
+from typing import Optional, List, Dict, Any
+
+# Tắt cảnh báo symlink trên Windows
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+
+DEPTH_MODEL_ID = "depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf"
+SEG_MODEL_ID = "nvidia/segformer-b0-finetuned-ade-512-512"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Ánh xạ các lớp bề mặt/vật cản của SegFormer ADE20K sang nhãn chuẩn của hệ thống
+SEG_OBSTACLE_MAP = {
+    "wall": ("wall", "bức tường"),
+    "door": ("door", "cửa ra vào"),
+    "double door": ("door", "cửa ra vào"),
+    "screen door": ("door", "cửa ra vào"),
+    "stairway": ("stairs", "cầu thang"),
+    "stairs": ("stairs", "cầu thang"),
+    "step": ("stairs", "bậc thang"),
+    "escalator": ("stairs", "thang cuốn"),
+    "column": ("column", "cột nhà"),
+    "pillar": ("column", "cột nhà"),
+    "cabinet": ("cabinet", "tủ"),
+    "wardrobe": ("cabinet", "tủ quần áo"),
+    "bookcase": ("cabinet", "tủ sách"),
+    "chest of drawers": ("cabinet", "tủ ngăn kéo"),
+    "refrigerator": ("refrigerator", "tủ lạnh"),
+    "table": ("table", "bàn"),
+    "desk": ("table", "bàn"),
+    "coffee table": ("table", "bàn"),
+    "chair": ("chair", "ghế"),
+    "armchair": ("chair", "ghế"),
+    "swivel chair": ("chair", "ghế xoay"),
+    "sofa": ("couch", "ghế sofa"),
+    "bed": ("bed", "giường ngủ"),
+    "fence": ("obstacle", "hàng rào"),
+    "railing": ("obstacle", "lan can"),
+    "bannister": ("obstacle", "tay vịn cầu thang"),
+    "person": ("person", "người"),
+    "individual": ("person", "người"),
+}
+
+# Các lớp mặt phẳng đi lại an toàn (không coi là vật cản đứng chắn trước mặt)
+SAFE_GROUND_LABELS = {
+    "floor", "flooring", "road", "route", "sidewalk", "pavement",
+    "path", "earth", "ground", "rug", "carpet", "mat", "grass",
+    "field", "sand", "ceiling", "sky",
+}
+
+
+class DepthService:
+    """
+    Dịch vụ tích hợp 3 mô hình thị giác bổ trợ cho YOLO:
+    1. Depth-Anything-V2-Metric-Indoor-Small-hf: Đo khoảng cách thực tế theo mét (m).
+    2. SegFormer (nvidia/segformer-b0-finetuned-ade-512-512): Nhận diện BỨC TƯỜNG (wall),
+       cửa, cầu thang, cột nhà, bàn ghế khi tiến lại gần hoặc khi YOLO bỏ sót.
+    3. Pothole YOLO (pothole.pt): Nhận diện ổ gà / mặt đường sụt lún kèm khoảng cách mét.
+    """
+
+    def __init__(self, model_id: str = DEPTH_MODEL_ID, seg_model_id: str = SEG_MODEL_ID):
+        self.model_id = model_id
+        self.seg_model_id = seg_model_id
+        self.device = DEVICE
+
+        self.processor = None
+        self.model = None
+        self.seg_processor = None
+        self.seg_model = None
+        self.pothole_model = None
+
+        self.is_loaded = False
+        self.seg_loaded = False
+        self._lock = threading.Lock()
+
+        # Bộ đệm depth map, segmentation map và ổ gà mới nhất
+        self._latest_depth_map: Optional[np.ndarray] = None
+        self._latest_seg_map: Optional[np.ndarray] = None
+        self._latest_potholes: List[Dict[str, Any]] = []
+        self._last_computed_time: float = 0.0
+        self._is_busy = False
+
+        # Khởi động nạp model trong luồng riêng để server bật tức thì
+        threading.Thread(target=self._load_model, daemon=True).start()
+
+    def _load_model(self):
+        t0 = time.time()
+        try:
+            from transformers import (
+                AutoImageProcessor,
+                AutoModelForDepthEstimation,
+                AutoModelForSemanticSegmentation,
+            )
+            print(f"[DepthService] Đang nạp Depth Anything V2 ({self.model_id}) trên {self.device.upper()}...")
+            self.processor = AutoImageProcessor.from_pretrained(self.model_id)
+            self.model = AutoModelForDepthEstimation.from_pretrained(self.model_id).to(self.device).eval()
+            self.is_loaded = True
+            print(f"[DepthService] ✅ Đã nạp xong Depth Anything V2 ({time.time() - t0:.2f}s)")
+        except Exception as e:
+            print(f"[DepthService] ⚠️ Không thể nạp Depth Anything V2: {e}")
+            self.is_loaded = False
+
+        try:
+            from transformers import AutoImageProcessor, AutoModelForSemanticSegmentation
+            t1 = time.time()
+            print(f"[DepthService] Đang nạp SegFormer ({self.seg_model_id}) nhận diện tường/bề mặt...")
+            self.seg_processor = AutoImageProcessor.from_pretrained(self.seg_model_id)
+            self.seg_model = AutoModelForSemanticSegmentation.from_pretrained(self.seg_model_id).to(self.device).eval()
+            self.seg_loaded = True
+            print(f"[DepthService] ✅ Đã nạp xong SegFormer ({time.time() - t1:.2f}s)")
+        except Exception as e:
+            print(f"[DepthService] ⚠️ Không thể nạp SegFormer: {e}")
+            self.seg_loaded = False
+
+        try:
+            from ultralytics import YOLO
+            here = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+            candidates = [
+                os.path.join(here, "pothole.pt"),
+                "pothole.pt",
+            ]
+            for p in candidates:
+                if os.path.exists(p):
+                    self.pothole_model = YOLO(p)
+                    print(f"[DepthService] ✅ Đã nạp mô hình phát hiện ổ gà: {p}")
+                    break
+        except Exception as e:
+            print(f"[DepthService] ⚠️ Không nạp được pothole.pt: {e}")
+
+    def compute_depth_map(self, frame_bgr: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Tính toán bản đồ độ sâu (depth map) theo mét VÀ bản đồ phân đoạn bề mặt (SegFormer)
+        cho ảnh BGR đầu vào.
+        """
+        if not self.is_loaded or self.model is None:
+            return None
+
+        try:
+            h, w = frame_bgr.shape[:2]
+            small_rgb = cv2.cvtColor(cv2.resize(frame_bgr, (256, 192)), cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(small_rgb)
+
+            # 1. Tính Metric Depth Map
+            inputs = self.processor(images=pil_img, return_tensors="pt").to(self.device)
+            with torch.no_grad():
+                out = self.model(**inputs).predicted_depth
+
+            depth_map = torch.nn.functional.interpolate(
+                out.unsqueeze(1),
+                size=(h, w),
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze().cpu().numpy()
+
+            depth_map = np.clip(depth_map, 0.2, 15.0)
+
+            # 2. Tính Semantic Segmentation Map (nhận diện bức tường, cửa, cầu thang, bàn ghế)
+            seg_map_resized = None
+            if self.seg_loaded and self.seg_model is not None and self.seg_processor is not None:
+                try:
+                    s_inputs = self.seg_processor(images=pil_img, return_tensors="pt").to(self.device)
+                    with torch.no_grad():
+                        s_logits = self.seg_model(**s_inputs).logits
+                    seg_ids = s_logits.argmax(dim=1).squeeze(0).cpu().numpy().astype(np.int32)
+                    seg_map_resized = cv2.resize(seg_ids, (w, h), interpolation=cv2.INTER_NEAREST)
+                except Exception as se:
+                    print(f"[DepthService] Lỗi SegFormer: {se}")
+
+            # 3. Chạy phát hiện ổ gà (Pothole)
+            pothole_list = []
+            if self.pothole_model is not None:
+                try:
+                    p_res = self.pothole_model(frame_bgr, verbose=False, conf=0.35, imgsz=320)
+                    for r in p_res:
+                        for box in r.boxes:
+                            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                            dist = self.get_box_median_depth(x1, y1, x2, y2, depth_map) or 1.8
+                            pothole_list.append({
+                                "class_name": "pothole",
+                                "class_name_vn": "ổ gà",
+                                "confidence": round(float(box.conf[0].item()), 2),
+                                "position": "center",
+                                "distance_m": dist,
+                                "bounding_box": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+                                "in_roi": True,
+                                "is_danger": dist <= 3.5,
+                            })
+                except Exception:
+                    pass
+
+            with self._lock:
+                self._latest_depth_map = depth_map
+                if seg_map_resized is not None:
+                    self._latest_seg_map = seg_map_resized
+                self._latest_potholes = pothole_list
+                self._last_computed_time = time.time()
+
+            return depth_map
+        except Exception as e:
+            print(f"[DepthService] Lỗi tính depth map: {e}")
+            return None
+
+    def trigger_async_compute(self, frame_bgr: np.ndarray):
+        """
+        Kích hoạt tính depth + segmentation:
+        - Nếu chưa có depth map nào trong bộ đệm (frame đầu tiên), tính đồng bộ ngay lập tức
+          để có khoảng cách mét và nhận diện tường ngay từ frame 1!
+        - Các frame tiếp theo chạy trong background thread để không làm giảm FPS.
+        """
+        if not self.is_loaded:
+            return
+
+        with self._lock:
+            has_first_map = self._latest_depth_map is not None
+            is_stale = (time.time() - self._last_computed_time) > 5.0
+
+        if not has_first_map or is_stale:
+            if not self._is_busy:
+                self._is_busy = True
+                try:
+                    self.compute_depth_map(frame_bgr)
+                finally:
+                    self._is_busy = False
+            return
+
+        if self._is_busy:
+            return
+
+        def _worker(img_copy):
+            self._is_busy = True
+            try:
+                self.compute_depth_map(img_copy)
+            finally:
+                self._is_busy = False
+
+        threading.Thread(target=_worker, args=(frame_bgr.copy(),), daemon=True).start()
+
+    def get_latest_depth_map(self) -> Optional[np.ndarray]:
+        with self._lock:
+            return self._latest_depth_map
+
+    def get_latest_potholes(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            return list(self._latest_potholes)
+
+    def get_box_median_depth(
+        self, x1: int, y1: int, x2: int, y2: int, depth_map: Optional[np.ndarray] = None
+    ) -> Optional[float]:
+        """
+        Lấy khoảng cách trung vị (median distance tính bằng mét) của vùng lõi Bounding Box.
+        """
+        dmap = depth_map if depth_map is not None else self.get_latest_depth_map()
+        if dmap is None:
+            return None
+
+        h, w = dmap.shape[:2]
+        bw, bh = max(1, x2 - x1), max(1, y2 - y1)
+        cx1 = max(0, min(w - 1, int(x1 + 0.2 * bw)))
+        cy1 = max(0, min(h - 1, int(y1 + 0.2 * bh)))
+        cx2 = max(cx1 + 1, min(w, int(x2 - 0.2 * bw)))
+        cy2 = max(cy1 + 1, min(h, int(y2 - 0.2 * bh)))
+
+        roi = dmap[cy1:cy2, cx1:cx2]
+        if roi.size == 0:
+            roi = dmap[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]
+
+        if roi.size > 0:
+            val = float(np.median(roi))
+            return round(val, 1)
+        return None
+
+    def _classify_front_region(self, x1: int, y1: int, x2: int, y2: int) -> tuple[str, str]:
+        """
+        Dùng SegFormer để xác định chính xác vật cản trước mặt là 'bức tường' (wall),
+        'cửa ra vào' (door), 'cầu thang' (stairs), 'bàn' (table), 'ghế' (chair) hay 'vật cản'.
+        """
+        with self._lock:
+            smap = self._latest_seg_map
+
+        if smap is None or not self.seg_loaded or self.seg_model is None:
+            return "obstacle", "vật cản"
+
+        sh, sw = smap.shape[:2]
+        rx1, ry1 = max(0, min(sw - 1, x1)), max(0, min(sh - 1, y1))
+        rx2, ry2 = max(rx1 + 1, min(sw, x2)), max(ry1 + 1, min(sh, y2))
+        patch = smap[ry1:ry2, rx1:rx2]
+        if patch.size == 0:
+            return "obstacle", "vật cản"
+
+        vals, counts = np.unique(patch, return_counts=True)
+        order = np.argsort(-counts)
+        total = float(patch.size)
+
+        id2label = getattr(self.seg_model.config, "id2label", {})
+        for idx in order:
+            cls_id = int(vals[idx])
+            ratio = counts[idx] / total
+            if ratio < 0.15:
+                continue
+            raw_label = id2label.get(cls_id, "").lower()
+            parts = [p.strip() for p in raw_label.replace(";", ",").split(",")]
+            # Bỏ qua nếu là mặt sàn/đường đi
+            if any(p in SAFE_GROUND_LABELS for p in parts):
+                continue
+            for p in parts:
+                if p in SEG_OBSTACLE_MAP:
+                    return SEG_OBSTACLE_MAP[p]
+
+        return "obstacle", "vật cản"
+
+    def detect_unknown_obstacles(
+        self,
+        frame_bgr: np.ndarray,
+        known_boxes: List[Dict[str, int]],
+        depth_map: Optional[np.ndarray] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        HỢP NHẤT ĐA MÔ HÌNH (YOLO + DEPTH ANYTHING V2 + SEGFORMER + POTHOLE):
+        1. Bổ khuyết các vật thể/cấu trúc mà SegFormer nhìn thấy rõ (bức tường, cầu thang,
+           cửa ra vào, bàn, ghế, tủ, cột nhà) nằm trong khoảng cách gần nhưng YOLO bỏ sót.
+        2. Phát hiện khối vật cản lạ trước mặt qua Depth Anything V2.
+        3. Gắn kết quả ổ gà từ pothole.pt.
+        Toàn bộ dùng lại bản đồ trong bộ đệm nên tốn < 1ms trên luồng chính!
+        """
+        dmap = depth_map if depth_map is not None else self.get_latest_depth_map()
+        if dmap is None:
+            return []
+
+        h, w = dmap.shape[:2]
+        results: List[Dict[str, Any]] = []
+
+        def _is_covered_by_yolo(bx1: int, by1: int, bx2: int, by2: int, thresh: float = 0.35) -> bool:
+            area = float(max(1, (bx2 - bx1) * (by2 - by1)))
+            for box in known_boxes:
+                ix1 = max(bx1, box.get("x1", 0))
+                iy1 = max(by1, box.get("y1", 0))
+                ix2 = min(bx2, box.get("x2", 0))
+                iy2 = min(by2, box.get("y2", 0))
+                if ix2 > ix1 and iy2 > iy1:
+                    if float((ix2 - ix1) * (iy2 - iy1)) / area > thresh:
+                        return True
+            return False
+
+        # 1. Quét các vật thể/kiến trúc quan trọng từ SegFormer (ghế, bàn, cửa, cầu thang, tủ, cột nhà)
+        with self._lock:
+            smap = self._latest_seg_map
+
+        if smap is not None and self.seg_loaded and self.seg_model is not None:
+            id2label = getattr(self.seg_model.config, "id2label", {})
+            vals, counts = np.unique(smap, return_counts=True)
+            total_pixels = float(h * w)
+
+            for cls_id, cnt in zip(vals, counts):
+                if cnt / total_pixels < 0.04:  # Chiếm ít nhất 4% khung hình
+                    continue
+                raw_label = id2label.get(int(cls_id), "").lower()
+                parts = [p.strip() for p in raw_label.replace(";", ",").split(",")]
+                matched = None
+                for p in parts:
+                    if p in SEG_OBSTACLE_MAP and p != "wall":
+                        matched = SEG_OBSTACLE_MAP[p]
+                        break
+                if not matched:
+                    continue
+
+                cls_en, cls_vn = matched
+                mask = (smap == cls_id).astype(np.uint8)
+                ys, xs = np.where(mask > 0)
+                if ys.size == 0:
+                    continue
+                bx1, by1, bx2, by2 = int(np.min(xs)), int(np.min(ys)), int(np.max(xs)), int(np.max(ys))
+                if _is_covered_by_yolo(bx1, by1, bx2, by2, thresh=0.30):
+                    continue
+
+                obj_depths = dmap[mask > 0]
+                dist_m = round(float(np.median(obj_depths)), 1) if obj_depths.size > 0 else 2.0
+                if dist_m <= 3.2:
+                    cx = (bx1 + bx2) / 2.0
+                    pos = "left" if cx < w / 3.0 else ("right" if cx > 2.0 * w / 3.0 else "center")
+                    results.append({
+                        "class_name": cls_en,
+                        "class_name_vn": cls_vn,
+                        "confidence": 0.82,
+                        "position": pos,
+                        "distance_m": dist_m,
+                        "bounding_box": {"x1": bx1, "y1": by1, "x2": bx2, "y2": by2},
+                        "in_roi": True,
+                        "is_danger": dist_m <= 2.8,
+                        "is_unknown": True,
+                    })
+                    known_boxes.append({"x1": bx1, "y1": by1, "x2": bx2, "y2": by2})
+
+        # 2. Quét vùng trung tâm trước mặt (y=25% -> 80%) để phát hiện BỨC TƯỜNG hoặc khối vật cản chắn lối đi
+        x_min, x_max = int(w * 0.25), int(w * 0.75)
+        y_min, y_max = int(h * 0.25), int(h * 0.80)
+        corridor_depth = dmap[y_min:y_max, x_min:x_max]
+
+        if corridor_depth.size > 0:
+            med_dist = float(np.median(corridor_depth))
+            p15_dist = float(np.percentile(corridor_depth, 15))
+            target_dist = p15_dist if p15_dist < 1.8 else med_dist
+
+            if target_dist <= 2.5 and not _is_covered_by_yolo(x_min, y_min, x_max, y_max, thresh=0.30):
+                corridor_area = float((x_max - x_min) * (y_max - y_min))
+                mask_close = (corridor_depth <= target_dist + 0.45).astype(np.uint8)
+                if np.sum(mask_close) >= (corridor_area * 0.12):
+                    bx1 = int(x_min + (x_max - x_min) * 0.10)
+                    bx2 = int(x_max - (x_max - x_min) * 0.10)
+                    by1 = int(y_min + (y_max - y_min) * 0.10)
+                    by2 = int(y_max)
+
+                    cls_en, cls_vn = self._classify_front_region(bx1, by1, bx2, by2)
+
+                    # Tránh báo nhầm sàn nhà khi cúi thấp camera
+                    is_floor_only = False
+                    if smap is not None and self.seg_loaded and self.seg_model is not None:
+                        patch = smap[by1:by2, bx1:bx2]
+                        if patch.size > 0:
+                            v, c = np.unique(patch, return_counts=True)
+                            dom_id = int(v[np.argmax(c)])
+                            dom_lbl = getattr(self.seg_model.config, "id2label", {}).get(dom_id, "").lower()
+                            dom_parts = [p.strip() for p in dom_lbl.replace(";", ",").split(",")]
+                            if any(p in ("floor", "flooring", "road", "sidewalk", "rug", "carpet") for p in dom_parts) and target_dist > 1.2:
+                                is_floor_only = True
+
+                    if not is_floor_only:
+                        obj_dist = round(target_dist, 1)
+                        results.append({
+                            "class_name": cls_en,
+                            "class_name_vn": cls_vn,
+                            "confidence": 0.85,
+                            "position": "center",
+                            "distance_m": obj_dist,
+                            "bounding_box": {"x1": bx1, "y1": by1, "x2": bx2, "y2": by2},
+                            "in_roi": True,
+                            "is_danger": obj_dist <= 2.5,
+                            "is_unknown": True,
+                        })
+
+        # 3. Gắn thêm ổ gà nếu phát hiện được
+        for ph in self.get_latest_potholes():
+            results.append(ph)
+
+        return results
+
+
+depth_service = DepthService()

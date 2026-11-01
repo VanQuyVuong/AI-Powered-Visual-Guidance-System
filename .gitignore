@@ -13,20 +13,36 @@ ENV/
 .vscode/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.log
+.DS_Store
+Thumbs.db
+
+# File cài đặt ứng dụng Android (tránh đẩy APK nặng lên git)
+*.apk
 
 # Thư mục chứa dữ liệu model AI (không push lên Github vì rất nặng)
 *.pt
 *.onnx
 
+# Cache âm thanh TTS tạm thời
+backend/audio_cache/
+audio_cache/
+*.mp3
+!backend/hn-viet-bach.mp3
+
 # Dữ liệu test
 test_images/
+test_ws_debug.py
 
 # Thư mục nghiên cứu mô hình 3D tham khảo bên ngoài (Tránh xung đột Git)
 1/
 SpatialLM/
 research*/
 
-# Ket qua test anh/video (nang)
+# Kết quả test ảnh/video (nặng)
 test_media/output/
 test_media/input/*
 !test_media/input/README.md

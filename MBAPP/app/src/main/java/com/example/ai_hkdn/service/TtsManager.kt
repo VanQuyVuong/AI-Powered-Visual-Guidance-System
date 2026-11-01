@@ -44,25 +44,34 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
         if (!isInitialized || text.isBlank()) return
 
         val now = System.currentTimeMillis()
-        val isHighPriority = priority.equals("HIGH", ignoreCase = true) || priority.equals("DANGER", ignoreCase = true)
+        val isSafeMessage = text.contains("an toàn", ignoreCase = true)
+        val wasSafeMessage = lastSpokenText.contains("an toàn", ignoreCase = true)
+        val isDanger = priority.equals("DANGER", ignoreCase = true) || priority.equals("HIGH", ignoreCase = true) || !isSafeMessage
 
-        if (!force && !isHighPriority) {
-            // Không lặp lại câu giống hệt trong vòng 2.5 giây
-            if (text == lastSpokenText && (now - lastSpokenTime) < 2500) {
-                return
-            }
-            // Không nói đè nếu câu trước vừa mới nói cách đây < 1.5 giây
-            if ((now - lastSpokenTime) < 1500) {
-                return
-            }
+        // 1. Nếu là thông báo "Phía trước an toàn": chỉ nhắc lại tối đa mỗi 8 giây và không bao giờ ngắt lời cảnh báo vật cản
+        if (!force && isSafeMessage) {
+            if (tts?.isSpeaking == true) return
+            if (wasSafeMessage && (now - lastSpokenTime) < 8000) return
+            if (!wasSafeMessage && (now - lastSpokenTime) < 3500) return
+        }
+
+        // 2. Chống lặp lại cùng một câu cảnh báo vật cản trong 2.5 giây
+        if (!force && text == lastSpokenText && (now - lastSpokenTime) < 2500) {
+            return
+        }
+
+        // 3. Nếu đang đọc câu "an toàn" hoặc lời chào mà phát hiện vật cản (ghế, chai, bàn, tường...) -> NGẮT NGAY để đọc vật cản!
+        val shouldFlushImmediately = force || (isDanger && (wasSafeMessage || text != lastSpokenText))
+
+        if (!shouldFlushImmediately && tts?.isSpeaking == true && (now - lastSpokenTime) < 1800) {
+            return
         }
 
         lastSpokenText = text
         lastSpokenTime = now
 
-        // Nếu khẩn cấp -> QUEUE_FLUSH (ngắt âm thanh cũ để đọc ngay), ngược lại QUEUE_ADD
-        val queueMode = if (isHighPriority || force) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_FLUSH
-        tts?.speak(text, queueMode, null, "UTTERANCE_${System.currentTimeMillis()}")
+        val queueMode = if (shouldFlushImmediately) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+        tts?.speak(text, queueMode, null, "UTTERANCE_$now")
     }
 
     fun stop() {

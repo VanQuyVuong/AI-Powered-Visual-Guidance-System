@@ -117,8 +117,8 @@ def run_tracking(image_bytes: bytes):
         
     height, width, _ = img.shape
     
-    # Chạy YOLO Tracking với ngưỡng tin cậy conf=0.35
-    results = model.track(img, persist=True, tracker="bytetrack.yaml", verbose=False, conf=0.35,
+    # Chạy YOLO Tracking với ngưỡng tin cậy conf=0.25 để bắt nhạy ghế, chai nước, cặp sách, bàn
+    results = model.track(img, persist=True, tracker="bytetrack.yaml", verbose=False, conf=0.25,
                           device=DEVICE, imgsz=640, **extra_kw)
     
     detections = []

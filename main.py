@@ -9,6 +9,14 @@ backend_dir = os.path.join(os.path.dirname(__file__), "backend")
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
+import io
+
+# Thiết lập UTF-8 cho console Windows
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'buffer'):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import uvicorn
 
 if __name__ == "__main__":

@@ -35,22 +35,26 @@ fun ARHudOverlay(
             drawPerspectiveRoi(screenW, screenH)
         }
 
-        // Tỷ lệ scale từ tọa độ frame ảnh YOLO sang màn hình điện thoại
-        val scaleX = screenW / imageSourceWidth.coerceAtLeast(1)
-        val scaleY = screenH / imageSourceHeight.coerceAtLeast(1)
+        // Khớp 1:1 với chế độ PreviewView.ScaleType.FILL_CENTER của camera:
+        // Phóng to đồng dạng theo cạnh lớn nhất và căn giữa khung hình (tránh méo tỷ lệ)
+        val srcW = imageSourceWidth.coerceAtLeast(1).toFloat()
+        val srcH = imageSourceHeight.coerceAtLeast(1).toFloat()
+        val scale = maxOf(screenW / srcW, screenH / srcH)
+        val offsetX = (screenW - srcW * scale) / 2f
+        val offsetY = (screenH - srcH * scale) / 2f
 
         // 2. Vẽ các vật thể phát hiện được
         objects.forEach { obj ->
             val box = obj.boundingBox
-            val left = box.x1 * scaleX
-            val top = box.y1 * scaleY
-            val right = box.x2 * scaleX
-            val bottom = box.y2 * scaleY
+            val left = box.x1 * scale + offsetX
+            val top = box.y1 * scale + offsetY
+            val right = box.x2 * scale + offsetX
+            val bottom = box.y2 * scale + offsetY
             val width = right - left
             val height = bottom - top
 
-            // Xác định xem vật thể có nguy hiểm không (nằm ở vị trí center hoặc chiều cao lớn)
-            val isDangerous = obj.position.equals("center", ignoreCase = true) || (height / screenH > 0.45f)
+            // Xác định xem vật thể có nguy hiểm không (từ cờ is_danger của server, ở vị trí center hoặc gần)
+            val isDangerous = (obj.isDanger == true) || obj.position.equals("center", ignoreCase = true) || (height / screenH > 0.40f)
             val boxColor = if (isDangerous) Color(0xFFFF2A55) else Color(0xFF00F0FF)
 
             // Vẽ hộp viền
@@ -70,7 +74,7 @@ fun ARHudOverlay(
             drawLine(boxColor, Offset(right, bottom), Offset(right - cornerLen, bottom), 7f)
             drawLine(boxColor, Offset(right, bottom), Offset(right, bottom - cornerLen), 7f)
 
-            // Vẽ nhãn đối tượng
+            // Vẽ nhãn đối tượng (tên tiếng Việt + khoảng cách mét)
             drawContext.canvas.nativeCanvas.apply {
                 val paint = android.graphics.Paint().apply {
                     color = android.graphics.Color.WHITE
@@ -84,7 +88,13 @@ fun ARHudOverlay(
                     else android.graphics.Color.argb(200, 0, 150, 180)
                 }
 
-                val label = "${obj.className} ${(obj.confidence * 100).toInt()}%"
+                val displayName = if (!obj.classNameVn.isNullOrBlank()) obj.classNameVn else obj.className
+                val distInfo = if (obj.distanceM != null && obj.distanceM > 0f) {
+                    String.format(java.util.Locale.US, "%.1fm", obj.distanceM)
+                } else {
+                    "${(obj.confidence * 100).toInt()}%"
+                }
+                val label = "$displayName $distInfo"
                 val textBounds = android.graphics.Rect()
                 paint.getTextBounds(label, 0, label.length, textBounds)
 

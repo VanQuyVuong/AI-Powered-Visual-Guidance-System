@@ -5,9 +5,11 @@ import sys
 import numpy as np
 
 # Nhúng thư mục backend vào đường dẫn hệ thống để gọi code THẬT ra test
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
-sys.path.append(current_dir)
+scripts_dir = os.path.dirname(os.path.abspath(__file__))
+backend_dir = os.path.dirname(scripts_dir)
+project_root = os.path.dirname(backend_dir)
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
 # IMPORT CODE THẬT TỪ HỆ THỐNG
 from app.vision.decision_engine import is_in_roi, determine_position

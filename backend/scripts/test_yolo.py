@@ -5,9 +5,10 @@ import sys
 import os
 
 def test_yolo_detection(image_path):
-    print(f"Đang tải model YOLOv8n...")
-    # Khởi tạo model YOLOv8 nano (nhẹ, nhanh, phù hợp MVP)
-    model = YOLO('yolov8n.pt') 
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(scripts_dir))
+    model_file = os.path.join(project_root, 'yolov8n.pt')
+    model = YOLO(model_file if os.path.exists(model_file) else 'yolov8n.pt') 
 
     if not os.path.exists(image_path):
         print(f"LỖI: Không tìm thấy ảnh tại {image_path}")

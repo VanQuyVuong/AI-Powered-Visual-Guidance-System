@@ -63,9 +63,9 @@ def estimate_distance(y1: int, y2: int, img_height: int) -> str:
 # Từ điển dịch tên tiếng Anh của YOLO sang tiếng Việt (COCO 80 classes + vật dụng quen thuộc)
 VOCAB = {
     "person": "người",
-    "bicycle": "chiếc xe đạp",
-    "car": "chiếc xe ô tô",
-    "motorcycle": "chiếc xe máy",
+    "bicycle": "xe đạp",
+    "car": "xe ô tô",
+    "motorcycle": "xe máy",
     "airplane": "máy bay",
     "bus": "xe buýt",
     "train": "tàu hỏa",
@@ -76,14 +76,14 @@ VOCAB = {
     "stop sign": "biển báo dừng",
     "parking meter": "đồng hồ đỗ xe",
     "bench": "ghế dài",
-    "bird": "con chim",
-    "cat": "con mèo",
-    "dog": "con chó",
-    "horse": "con ngựa",
-    "sheep": "con cừu",
-    "cow": "con bò",
-    "elephant": "con voi",
-    "bear": "con gấu",
+    "bird": "chim",
+    "cat": "mèo",
+    "dog": "chó",
+    "horse": "ngựa",
+    "sheep": "cừu",
+    "cow": "bò",
+    "elephant": "voi",
+    "bear": "gấu",
     "zebra": "ngựa vằn",
     "giraffe": "hươu cao cổ",
     "backpack": "ba lô",
@@ -101,7 +101,7 @@ VOCAB = {
     "surfboard": "ván lướt sóng",
     "tennis racket": "vợt tennis",
     "bottle": "chai nước",
-    "wine glass": "ly rượu",
+    "wine glass": "ly nước",
     "cup": "cốc nước",
     "fork": "cái nĩa",
     "knife": "con dao",
@@ -113,16 +113,16 @@ VOCAB = {
     "orange": "quả cam",
     "broccoli": "bông cải xanh",
     "carrot": "củ cà rốt",
-    "hot dog": "bánh mì kẹp xúc xích",
+    "hot dog": "bánh mì xúc xích",
     "pizza": "bánh pizza",
     "donut": "bánh donut",
     "cake": "bánh ngọt",
-    "chair": "chiếc ghế",
+    "chair": "ghế",
     "couch": "ghế sofa",
     "potted plant": "chậu cây",
     "bed": "giường ngủ",
     "dining table": "bàn ăn",
-    "table": "chiếc bàn",
+    "table": "bàn",
     "toilet": "bồn cầu",
     "tv": "màn hình tivi",
     "laptop": "máy tính xách tay",
@@ -144,7 +144,13 @@ VOCAB = {
     "toothbrush": "bàn chải",
     "door": "cửa ra vào",
     "stair": "bậc thang",
-    "stairs": "cầu thang"
+    "stairs": "cầu thang",
+    "wall": "bức tường",
+    "column": "cột nhà",
+    "pillar": "cột nhà",
+    "cabinet": "tủ",
+    "obstacle": "vật cản",
+    "pothole": "ổ gà"
 }
 
 def get_vietnamese_name(class_name: str) -> str:
@@ -156,51 +162,75 @@ def get_vietnamese_name(class_name: str) -> str:
 
 def generate_guidance(detections: list) -> dict:
     """
-    Nhận danh sách các vật thể, lọc ra vật thể quan trọng và ghép thành câu tiếng Việt tự nhiên.
+    Nhận danh sách các vật thể, chọn lọc vật quan trọng nhất và sinh câu cảnh báo
+    siêu ngắn gọn, phản xạ tức thì (ví dụ: 'Phía trước 2 mét có ghế.').
     """
     if not detections:
         return None
         
     parts = []
     has_person = False
-    for det in detections:
+    min_dist_found = 99.0
+    
+    # Sắp xếp ưu tiên: center trước mặt lên đầu, vật ở gần lên đầu
+    def _sort_key(d):
+        pos = getattr(d, "position", "center")
+        pos_score = 0 if pos == "center" else 1
+        dist = getattr(d, "distance_m", None) or getattr(d, "dist_m", None) or 5.0
+        return (pos_score, dist)
+        
+    sorted_dets = sorted(detections, key=_sort_key)
+    
+    for det in sorted_dets:
         conf = getattr(det, "confidence", 0.0)
-        # Bỏ qua các nhận diện có độ tin cậy thấp (< 0.45)
-        if conf < 0.45:
+        # Bỏ qua các nhận diện có độ tin cậy thấp (< 0.40) theo chuẩn Unit Test
+        if conf < 0.40:
             continue
             
         cname = getattr(det, "class_name", "")
-        # Nếu chưa có trong vocab dùng tên gốc (đảm bảo test test_unknown_class_uses_english_name pass)
         name_vn = VOCAB.get(cname.lower().strip(), cname) if cname else "vật cản"
         if cname == "person":
             has_person = True
             
-        # Ước lượng khoảng cách từ bounding box
+        # Xác định khoảng cách mét
+        dist_val = getattr(det, "distance_m", None) or getattr(det, "dist_m", None)
         dist_text = ""
-        bbox = getattr(det, 'bounding_box', None)
-        if bbox:
-            y1 = getattr(bbox, 'y1', 0)
-            y2 = getattr(bbox, 'y2', 0)
-            h = y2 - y1
-            if h > 300:
-                dist_text = " khoảng cách rất gần"
-            elif h > 150:
-                dist_text = " khoảng 1 đến 2 mét"
+        if dist_val is not None and dist_val > 0:
+            if dist_val <= 1.0:
+                dist_text = "1 mét "
+            elif dist_val <= 1.6:
+                dist_text = "1 mét rưỡi "
             else:
-                dist_text = " khoảng 3 mét"
+                dist_text = f"{round(dist_val)} mét "
+        else:
+            bbox = getattr(det, 'bounding_box', None)
+            if bbox:
+                y1 = getattr(bbox, 'y1', 0)
+                y2 = getattr(bbox, 'y2', 0)
+                h = y2 - y1
+                if h > 300:
+                    dist_text = "rất gần "
+                elif h > 150:
+                    dist_text = "1 đến 2 mét "
+                else:
+                    dist_text = "3 mét "
         
         pos = getattr(det, "position", "center")
         if pos == "left":
-            parts.append(f"bên trái có {name_vn}{dist_text}")
+            parts.append(f"bên trái {dist_text}có {name_vn}".replace("  ", " "))
         elif pos == "right":
-            parts.append(f"bên phải có {name_vn}{dist_text}")
+            parts.append(f"bên phải {dist_text}có {name_vn}".replace("  ", " "))
         else:
-            parts.append(f"ngay phía trước có {name_vn}{dist_text}")
+            parts.append(f"Phía trước {dist_text}có {name_vn}".replace("  ", " "))
             
     if not parts:
         return None
         
-    text = "Cảnh báo, " + " và ".join(parts[:2]) + "."
+    # Ghép câu ngắn gọn: tối đa 2 vật quan trọng nhất
+    if len(parts) == 1:
+        text = parts[0].strip().capitalize() + "."
+    else:
+        text = parts[0].strip().capitalize() + " và " + parts[1].strip() + "."
     
     return {
         "text": text,

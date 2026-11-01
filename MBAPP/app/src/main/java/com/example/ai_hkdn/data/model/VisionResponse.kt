@@ -18,8 +18,11 @@ data class VisionResponse(
 data class DetectedObject(
     @SerializedName("id") val id: Int? = null,
     @SerializedName("class_name") val className: String,
+    @SerializedName("class_name_vn") val classNameVn: String? = null,
     @SerializedName("confidence") val confidence: Float,
     @SerializedName("position") val position: String = "center", // left, center, right
+    @SerializedName("distance_m") val distanceM: Float? = null,
+    @SerializedName("is_danger") val isDanger: Boolean? = null,
     @SerializedName("bounding_box") val boundingBox: BoundingBox
 )
 

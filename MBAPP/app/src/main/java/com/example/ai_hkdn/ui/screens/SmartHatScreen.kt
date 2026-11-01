@@ -122,10 +122,15 @@ fun SmartHatScreen() {
         }
     }
 
-    // Cập nhật URL khi đổi IP
+    // Cập nhật URL khi đổi IP hoặc dùng Ngrok domain
     LaunchedEffect(serverIp) {
-        webSocketService.updateServerUrl("ws://$serverIp/api/v1/vision/stream")
-        ocrService.updateServerUrl("http://$serverIp")
+        val cleanHost = serverIp.trim().removePrefix("http://").removePrefix("https://").removePrefix("ws://").removePrefix("wss://")
+        val isSecure = serverIp.startsWith("https://") || serverIp.startsWith("wss://") || cleanHost.contains("ngrok") || cleanHost.contains("trycloudflare")
+        val wsScheme = if (isSecure) "wss" else "ws"
+        val httpScheme = if (isSecure) "https" else "http"
+        
+        webSocketService.updateServerUrl("$wsScheme://$cleanHost/api/v1/vision/stream")
+        ocrService.updateServerUrl("$httpScheme://$cleanHost")
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -418,9 +423,10 @@ private fun IpConfigDialog(
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 Text("Gợi ý cài đặt sẵn:", fontSize = 12.sp, color = Color.Gray)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AssistChip(onClick = { textIp = "192.168.1.49:8000" }, label = { Text("192.168.1.49") })
-                    AssistChip(onClick = { textIp = "10.0.2.2:8000" }, label = { Text("Máy ảo (10.0.2.2)") })
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AssistChip(onClick = { textIp = "127.0.0.1:8000" }, label = { Text("Cáp USB") })
+                    AssistChip(onClick = { textIp = "192.168.1.49:8000" }, label = { Text("Wi-Fi") })
+                    AssistChip(onClick = { textIp = "10.0.2.2:8000" }, label = { Text("Máy ảo") })
                 }
             }
         },

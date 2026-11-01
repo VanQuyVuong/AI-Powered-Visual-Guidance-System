@@ -35,7 +35,11 @@ fun CameraPreviewView(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
-    val previewView = remember { PreviewView(context) }
+    val previewView = remember {
+        PreviewView(context).apply {
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
