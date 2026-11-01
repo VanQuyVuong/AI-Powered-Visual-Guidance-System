@@ -130,25 +130,72 @@ async def read_text_api(image: UploadFile = File(...)):
     return {"success": True, "text": text}
 
 
+@app.get("/view-phone")
+async def view_phone_stream_page():
+    """Phục vụ giao diện xem video stream trực tiếp từ điện thoại."""
+    html_path = os.path.join(os.path.dirname(__file__), "view_phone_stream.html")
+    if os.path.exists(html_path):
+        return FileResponse(html_path, media_type="text/html")
+    raise HTTPException(status_code=404, detail="view_phone_stream.html not found")
+
+
 # ==========================================
-# 3. WEBSOCKET STREAM THỜI GIAN THỰC (REAL-TIME HUD)
+# 3. WEBSOCKET STREAM THỜI GIAN THỰC (REAL-TIME HUD & REMOTE MONITOR)
 # ==========================================
+class ConnectionManager:
+    """Quản lý các kết nối WebSocket cho cả Phone Stream và Web Remote Viewer."""
+    def __init__(self):
+        self.active_connections: list = []
+        self.latest_result: dict = None
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        print(f"📱 Client kết nối. Tổng số kết nối: {len(self.active_connections)}")
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        print(f"📱 Client ngắt kết nối. Tổng số kết nối: {len(self.active_connections)}")
+
+    async def broadcast(self, message: dict):
+        self.latest_result = message
+        for conn in list(self.active_connections):
+            try:
+                await conn.send_json(message)
+            except Exception:
+                pass
+
+manager = ConnectionManager()
+
+
 @app.websocket("/api/v1/vision/stream")
 async def websocket_endpoint(websocket: WebSocket):
     """
     WebSocket Stream phân tích video thời gian thực từ Mobile App / Web.
-    Sử dụng kiến trúc Drop Frame (chỉ giữ frame mới nhất) để tránh trễ hình.
+    - Phone Client: Gửi frame base64 -> Nhận kết quả AI -> Broadcast đến Web Monitor.
+    - Web Viewer (VIEW_ONLY): Kết nối để theo dõi màn hình điện thoại từ xa.
     """
-    await websocket.accept()
-    print("📱 Client đã kết nối tới Video Stream!")
+    await manager.connect(websocket)
 
-    state = {"latest": None, "closed": False}
+    # Nếu có kết quả gần nhất, gửi ngay cho client mới kết nối
+    if manager.latest_result:
+        try:
+            await websocket.send_json(manager.latest_result)
+        except Exception:
+            pass
+
+    state = {"latest": None, "closed": False, "is_viewer": False}
     new_frame = asyncio.Event()
 
     async def reader():
         try:
             while True:
-                state["latest"] = await websocket.receive_text()
+                msg = await websocket.receive_text()
+                if msg == "VIEW_ONLY":
+                    state["is_viewer"] = True
+                    continue
+                state["latest"] = msg
                 new_frame.set()
         except Exception:
             pass
@@ -159,6 +206,18 @@ async def websocket_endpoint(websocket: WebSocket):
     reader_task = asyncio.create_task(reader())
     try:
         while True:
+            if state["is_viewer"]:
+                # Client chỉ xem: gửi kết quả mới nhất định kỳ
+                if manager.latest_result:
+                    try:
+                        await websocket.send_json(manager.latest_result)
+                    except Exception:
+                        break
+                await asyncio.sleep(0.08)
+                if state["closed"]:
+                    break
+                continue
+
             await new_frame.wait()
             new_frame.clear()
             if state["closed"]:
@@ -172,7 +231,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     data = data.split(",", 1)[1]
                 image_bytes = base64.b64decode(data)
                 result = await asyncio.to_thread(analyze_frame_sync, image_bytes)
-                await websocket.send_json(result)
+                # Gửi cho chính client và broadcast cho các Web Viewer
+                await manager.broadcast(result)
             except WebSocketDisconnect:
                 break
             except Exception as frame_error:
@@ -186,7 +246,7 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"❌ Lỗi WebSocket: {e}")
     finally:
         reader_task.cancel()
-        print("📱 Client đã ngắt kết nối.")
+        manager.disconnect(websocket)
 
 
 # ==========================================

@@ -178,11 +178,29 @@ def analyze_frame_sync(image_bytes: bytes) -> dict:
     elif not guidance_data["text"]:
         guidance_data["text"] = "Phía trước an toàn."
 
+    # 6. Thuật toán điều hướng 3 làn (Navigation: straight/left/right/stop)
+    from app.vision.decision_engine import generate_navigation_direction, get_mode
+    nav_data = generate_navigation_direction(roi_detections, img_width, img_height)
+
+    # 7. Mã hóa frame_b64 phục vụ xem trực tiếp trên web monitor (/view-phone)
+    import base64
+    frame_b64 = None
+    if frame_bgr is not None:
+        try:
+            _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            frame_b64 = base64.b64encode(buffer).decode('utf-8')
+        except Exception:
+            pass
+
     return {
         "success": True,
+        "mode": get_mode(),
         "objects": all_objects,
         "has_person_in_roi": has_person_in_roi,
         "has_obstacle_in_roi": has_obstacle_in_roi,
         "guidance": guidance_data,
+        "navigation": nav_data,
+        "frame_b64": frame_b64,
         "img_size": {"width": img_width, "height": img_height}
     }
+

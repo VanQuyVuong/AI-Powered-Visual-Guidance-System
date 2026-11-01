@@ -238,3 +238,83 @@ def generate_guidance(detections: list) -> dict:
         "priority": "HIGH" if "phía trước" in text.lower() or has_person else "MEDIUM"
     }
 
+
+# ─── 3-LANE NAVIGATION ENGINE (ĐIỀU HƯỚNG 3 LÀN THỜI GIAN THỰC) ───
+SYSTEM_MODE = "NAVIGATION"  # NAVIGATION (hướng dẫn đường) hoặc CONVERSATION (hỏi đáp)
+
+def set_mode(mode: str):
+    """Chuyển đổi chế độ hoạt động"""
+    global SYSTEM_MODE
+    if mode in ["NAVIGATION", "CONVERSATION"]:
+        SYSTEM_MODE = mode
+
+def get_mode() -> str:
+    """Lấy chế độ hiện tại"""
+    return SYSTEM_MODE
+
+def generate_navigation_direction(detections: list, img_width: int = 640, img_height: int = 480) -> dict:
+    """
+    Thuật toán điều hướng 3 làn (3-Lane Navigation Engine):
+    Phân tích mức độ cản trở ở 3 làn: Trái (Left), Giữa (Center), Phải (Right).
+    Trả về:
+    {
+        "direction": "straight" | "left" | "right" | "stop",
+        "confidence": float,
+        "text": "Đi thẳng" | "Rẽ trái" | "Rẽ phải" | "Dừng lại",
+        "scores": {"center": int, "left": int, "right": int}
+    }
+    """
+    if not detections:
+        return {
+            "direction": "straight",
+            "confidence": 0.95,
+            "text": "Đi thẳng",
+            "scores": {"center": 0, "left": 0, "right": 0}
+        }
+
+    center_score = 0
+    left_score = 0
+    right_score = 0
+
+    for d in detections:
+        pos = getattr(d, "position", None) or (d.get("position") if isinstance(d, dict) else "center")
+        dist = getattr(d, "distance_m", None) or (d.get("distance_m") if isinstance(d, dict) else None) or 5.0
+        is_dang = getattr(d, "is_danger", None) or (d.get("is_danger") if isinstance(d, dict) else False)
+
+        if dist <= 1.5 or is_dang:
+            weight = 3
+        elif dist <= 3.0:
+            weight = 2
+        elif dist <= 4.5:
+            weight = 1
+        else:
+            weight = 0
+
+        if pos == "center":
+            center_score += weight
+        elif pos == "left":
+            left_score += weight
+        elif pos == "right":
+            right_score += weight
+
+    scores = {"center": center_score, "left": left_score, "right": right_score}
+
+    # Cả 3 hướng đều bị chặn nặng -> DỪNG LẠI
+    if center_score >= 2 and left_score >= 2 and right_score >= 2:
+        return {"direction": "stop", "confidence": 0.95, "text": "Dừng lại", "scores": scores}
+
+    # Làn giữa có vật cản -> Rẽ sang làn an toàn hơn
+    if center_score >= 2:
+        if left_score <= right_score:
+            return {"direction": "left", "confidence": min(0.9, 0.5 + center_score * 0.1), "text": "Rẽ trái", "scores": scores}
+        else:
+            return {"direction": "right", "confidence": min(0.9, 0.5 + center_score * 0.1), "text": "Rẽ phải", "scores": scores}
+    elif center_score >= 1:
+        if left_score <= right_score:
+            return {"direction": "left", "confidence": 0.7, "text": "Rẽ trái nhẹ", "scores": scores}
+        else:
+            return {"direction": "right", "confidence": 0.7, "text": "Rẽ phải nhẹ", "scores": scores}
+    else:
+        return {"direction": "straight", "confidence": 0.9, "text": "Đi thẳng", "scores": scores}
+
+

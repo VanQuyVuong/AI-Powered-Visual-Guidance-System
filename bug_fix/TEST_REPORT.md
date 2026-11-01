@@ -1,5 +1,5 @@
 # 📋 BÁO CÁO KIỂM THỬ TOÀN DIỆN DỰ ÁN MŨ THÔNG MINH
-*Thời gian chạy:* 2026-10-30 13:19:03
+*Thời gian chạy:* 2026-11-02 01:06:25
 *Nhánh Git:* Van_version2
 
 ## 1. Kết Quả Tổng Quan
@@ -14,18 +14,18 @@
 
 | STT | Tên Hạng Mục Kiểm Thử | Trạng Thái | Chi Tiết / Thời Gian Phản Hồi |
 | :---: | :--- | :---: | :--- |
-| 1 | YOLO Inference Sample Image | **✅ PASS** | Model: yolo26n.pt, Detections: 8, Time: 158.7ms |
-| 2 | YOLO ByteTrack Tracking | **✅ PASS** | Tracked: 8 objects, Time: 148.0ms |
+| 1 | YOLO Inference Sample Image | **✅ PASS** | Model: yolo11s.pt, Detections: 12, Time: 211.3ms |
+| 2 | YOLO ByteTrack Tracking | **✅ PASS** | Tracked: 12 objects, Time: 255.1ms |
 | 3 | YOLO Empty Bytes Handling | **✅ PASS** | Bắt lỗi ValueError hợp lệ khi byte rỗng |
 | 4 | YOLO Corrupt Bytes Handling | **✅ PASS** | Bắt lỗi ValueError hợp lệ khi byte ảnh hỏng |
 | 5 | Tactile Paving Detector (Sample) | **✅ PASS** | Kết quả phát hiện: False |
 | 6 | Tactile Paving Empty Bytes | **✅ PASS** | Xử lý byte rỗng an toàn, trả về: False |
 | 7 | OCR Service Availability | **✅ PASS** | EasyOCR status: Khả dụng |
-| 8 | OCR Text Extraction | **✅ PASS** | Thời gian: 1505.3ms, Văn bản: 'Không tìm thấy chữ nào rõ ràng trong ảnh....' |
-| 9 | TTS Generation | **✅ PASS** | ID: 936c48bb5f306e0fac8335ec9c09b72c, Audio URL: /api/v1/voice/audio/936c48bb5f306e0fac8335ec9c09b72c, Time: 60.1ms |
+| 8 | OCR Text Extraction | **✅ PASS** | Thời gian: 1522.0ms, Văn bản: 'Không tìm thấy chữ nào rõ ràng trong ảnh....' |
+| 9 | TTS Generation | **✅ PASS** | ID: 936c48bb5f306e0fac8335ec9c09b72c, Audio URL: /api/v1/voice/audio/936c48bb5f306e0fac8335ec9c09b72c, Time: 1.8ms |
 | 10 | TTS Audio Bytes Retrieval | **✅ PASS** | Kích thước audio: 38016 bytes |
 | 11 | Endpoint GET / (Web HUD) | **✅ PASS** | Status: 200, Length: 129230 bytes |
-| 12 | Endpoint POST /api/v1/vision/analyze | **✅ PASS** | Detections: 8, Guidance: {'text': 'Phía trước 2 mét có xe tải.', 'priority': 'HIGH', 'has_person': False} |
+| 12 | Endpoint POST /api/v1/vision/analyze | **✅ PASS** | Detections: 9, Guidance: {'text': 'Phía trước 2 mét có xe tải.', 'priority': 'HIGH', 'has_person': False} |
 | 13 | Endpoint POST /api/v1/vision/analyze (Non-Image) | **✅ PASS** | Bắt lỗi non-image thành công |
 | 14 | Endpoint POST /api/v1/voice/tts | **✅ PASS** | Audio ID: c88b193090fe068c751262904986766a |
 | 15 | Endpoint GET /api/v1/voice/audio/{id} | **✅ PASS** | Status: 200, Content-Type: audio/mpeg |
@@ -34,8 +34,8 @@
 | 18 | Assistant Ask: 'Tôi đang ở đâu?' | **✅ PASS** | Trả lời: 'Bạn đang ở Chặng 1: Đi thẳng 25m. Hãy ch...' |
 | 19 | Assistant Ask: 'Bạn làm được những gì?' | **✅ PASS** | Trả lời: 'Tôi đang lắng nghe. Bạn có thể hỏi: Phía...' |
 | 20 | Endpoint POST /api/v1/spatial/inspect-room | **✅ PASS** | Status: 200, Success: True |
-| 21 | WebSocket Single Frame Stream | **✅ PASS** | RTT: 98.4ms, Objects: 8, Guidance: Phía trước 2 mét có xe tải. |
-| 22 | WebSocket 5-Frame Continuous Stream | **✅ PASS** | Avg Latency: 93.6ms (Min: 86.3ms, Max: 104.1ms) |
+| 21 | WebSocket Single Frame Stream | **✅ PASS** | RTT: 202.2ms, Objects: 9, Guidance: Phía trước 2 mét có xe tải. |
+| 22 | WebSocket 5-Frame Continuous Stream | **✅ PASS** | Avg Latency: 170.8ms (Min: 166.9ms, Max: 175.4ms) |
 | 23 | WebSocket Corrupted Data Recovery | **✅ PASS** | Server xử lý lỗi mượt mà: Không thể đọc được ảnh (INVALID_IMAGE) |
 | 24 | MBAPP Kotlin Architecture Integrity | **✅ PASS** | Toàn bộ 11 file kiến trúc cốt lõi đều đầy đủ. |
 

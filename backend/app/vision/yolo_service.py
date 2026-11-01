@@ -4,10 +4,12 @@ import numpy as np
 from ultralytics import YOLO
 
 # Tải model ở ngoài hàm để load 1 lần khi bật server
-# Thứ tự ưu tiên: Custom model (ONNX/PT) -> YOLO26n -> YOLO11n -> YOLOv8n
+# Thứ tự ưu tiên: Custom model -> YOLO11s (Small, 47% mAP) -> YOLO11m -> YOLO11n -> YOLOv8n
 model_file = None
 candidates = [
     os.getenv("YOLO_MODEL"),
+    "yolo11s.pt",
+    "yolo11m.pt",
     "guidance_model.onnx",
     "guidance_model.pt",
     "yolo26n.pt",

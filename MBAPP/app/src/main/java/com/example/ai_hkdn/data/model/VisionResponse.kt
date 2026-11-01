@@ -7,9 +7,20 @@ import com.google.gson.annotations.SerializedName
  */
 data class VisionResponse(
     @SerializedName("success") val success: Boolean,
+    @SerializedName("mode") val mode: String? = null,
     @SerializedName("objects") val objects: List<DetectedObject>? = null,
     @SerializedName("guidance") val guidance: GuidanceInfo? = null,
+    @SerializedName("navigation") val navigation: NavigationInfo? = null,
     @SerializedName("error") val error: String? = null
+)
+
+/**
+ * Chỉ dẫn điều hướng 3 làn (Dẫn đường thời gian thực)
+ */
+data class NavigationInfo(
+    @SerializedName("direction") val direction: String = "straight", // straight, left, right, stop
+    @SerializedName("confidence") val confidence: Float = 0.9f,
+    @SerializedName("text") val text: String? = null
 )
 
 /**
