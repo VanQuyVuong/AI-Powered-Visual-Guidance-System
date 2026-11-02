@@ -79,15 +79,20 @@ private fun bindCameraUseCases(
     onFrameCaptured: (ByteArray, String) -> Unit
 ) {
     val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+    val displayRotation = previewView.display?.rotation ?: android.view.Surface.ROTATION_0
+    val targetRatio = androidx.camera.core.AspectRatio.RATIO_4_3
 
-    val preview = Preview.Builder().build().also {
-        it.setSurfaceProvider(previewView.surfaceProvider)
-    }
+    val preview = Preview.Builder()
+        .setTargetAspectRatio(targetRatio)
+        .setTargetRotation(displayRotation)
+        .build().also {
+            it.setSurfaceProvider(previewView.surfaceProvider)
+        }
 
-    // Cấu hình ImageAnalysis ở độ phân giải 640x480 (chuẩn YOLO)
-    // STRATEGY_KEEP_ONLY_LATEST: Tự động bỏ qua các frame cũ nếu máy chưa kịp xử lý
+    // Cấu hình ImageAnalysis đồng bộ cùng tỷ lệ 4:3 và cùng rotation để trường nhìn FOV khớp 100%
     val imageAnalysis = ImageAnalysis.Builder()
-        .setTargetResolution(Size(640, 480))
+        .setTargetAspectRatio(targetRatio)
+        .setTargetRotation(displayRotation)
         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
         .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
         .build()

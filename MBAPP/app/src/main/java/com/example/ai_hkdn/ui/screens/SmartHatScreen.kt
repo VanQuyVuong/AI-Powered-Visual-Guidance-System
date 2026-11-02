@@ -79,6 +79,9 @@ fun SmartHatScreen() {
     var showIpDialog by remember { mutableStateOf(false) }
     var latestJpegBytes by remember { mutableStateOf<ByteArray?>(null) }
 
+    var srcFrameWidth by remember { mutableIntStateOf(480) }
+    var srcFrameHeight by remember { mutableIntStateOf(640) }
+
     // Dịch vụ TTS & OCR & WebSocket
     val ttsManager = remember { TtsManager(context) }
     val ocrService = remember { OcrService("http://$serverIp") }
@@ -90,6 +93,12 @@ fun SmartHatScreen() {
                 latencyMs = latency
                 if (response.success) {
                     detectedObjects = response.objects ?: emptyList()
+                    response.imgSize?.let { size ->
+                        if (size.width > 0 && size.height > 0) {
+                            srcFrameWidth = size.width
+                            srcFrameHeight = size.height
+                        }
+                    }
                     val text = response.guidance?.text
                     val priority = response.guidance?.priority ?: "LOW"
                     if (!text.isNullOrBlank()) {
@@ -149,6 +158,8 @@ fun SmartHatScreen() {
         // 2. Tầng AR HUD Canvas (Vùng an toàn ROI & Bounding Box)
         ARHudOverlay(
             objects = detectedObjects,
+            imageSourceWidth = srcFrameWidth,
+            imageSourceHeight = srcFrameHeight,
             showRoi = isStreaming,
             modifier = Modifier.fillMaxSize()
         )

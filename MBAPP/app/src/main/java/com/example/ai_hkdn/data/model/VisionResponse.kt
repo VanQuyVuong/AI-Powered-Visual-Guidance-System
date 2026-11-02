@@ -11,7 +11,16 @@ data class VisionResponse(
     @SerializedName("objects") val objects: List<DetectedObject>? = null,
     @SerializedName("guidance") val guidance: GuidanceInfo? = null,
     @SerializedName("navigation") val navigation: NavigationInfo? = null,
+    @SerializedName("img_size") val imgSize: ImageSize? = null,
     @SerializedName("error") val error: String? = null
+)
+
+/**
+ * Kích thước khung hình gốc từ backend để căn chỉnh tỷ lệ HUD chính xác 100%
+ */
+data class ImageSize(
+    @SerializedName("width") val width: Int = 480,
+    @SerializedName("height") val height: Int = 640
 )
 
 /**

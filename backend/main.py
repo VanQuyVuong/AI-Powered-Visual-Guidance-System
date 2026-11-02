@@ -50,13 +50,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# SAM Service Router (MobileSAM on-demand segmentation)
+from app.vision.sam_router import router as sam_router
+app.include_router(sam_router)
+
 
 # ==========================================
 # 1. GIAO DIỆN WEB & STATIC DEMO
 # ==========================================
 @app.get("/")
 async def serve_web_demo():
-    """Phục vụ giao diện Web Demo AI Visual Guidance System & AR Navigation."""
+    """Phục vụ giao diện Trung tâm giám sát 4 Model AI & Video từ điện thoại."""
+    phone_stream_file = os.path.join(os.path.dirname(__file__), "view_phone_stream.html")
+    if os.path.exists(phone_stream_file):
+        return FileResponse(phone_stream_file)
     static_file = os.path.join(os.path.dirname(__file__), "static", "index.html")
     if os.path.exists(static_file):
         return FileResponse(static_file)

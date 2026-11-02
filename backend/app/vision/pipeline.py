@@ -182,13 +182,24 @@ def analyze_frame_sync(image_bytes: bytes) -> dict:
     from app.vision.decision_engine import generate_navigation_direction, get_mode
     nav_data = generate_navigation_direction(roi_detections, img_width, img_height)
 
-    # 7. Mã hóa frame_b64 phục vụ xem trực tiếp trên web monitor (/view-phone)
+    # 7. Mã hóa frame_b64 và depth_b64 phục vụ xem trực tiếp trên web monitor (/view-phone)
     import base64
     frame_b64 = None
     if frame_bgr is not None:
         try:
             _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
             frame_b64 = base64.b64encode(buffer).decode('utf-8')
+        except Exception:
+            pass
+
+    depth_b64 = None
+    cur_dmap = dmap if dmap is not None else depth_service.get_latest_depth_map()
+    if cur_dmap is not None:
+        try:
+            d_norm = cv2.normalize(cur_dmap, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+            d_colored = cv2.applyColorMap(d_norm, cv2.COLORMAP_TURBO)
+            _, d_buf = cv2.imencode('.jpg', d_colored, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            depth_b64 = base64.b64encode(d_buf).decode('utf-8')
         except Exception:
             pass
 
@@ -201,6 +212,8 @@ def analyze_frame_sync(image_bytes: bytes) -> dict:
         "guidance": guidance_data,
         "navigation": nav_data,
         "frame_b64": frame_b64,
+        "depth_b64": depth_b64,
+        "depth": {"colormap_b64": depth_b64} if depth_b64 else None,
         "img_size": {"width": img_width, "height": img_height}
     }
 

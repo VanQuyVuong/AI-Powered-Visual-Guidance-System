@@ -1,444 +1,1178 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Xem Kết Quả Từ Điện Thoại</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-    font-family: 'Inter', sans-serif;
-    background: #0a0e17;
-    color: #fff;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-}
-.header {
-    padding: 20px 30px;
-    background: linear-gradient(135deg, rgba(10,14,23,0.98) 0%, rgba(18,24,38,0.95) 100%);
-    border-bottom: 1px solid rgba(0,229,255,0.2);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-.header h1 {
-    font-size: 24px;
-    font-weight: 800;
-    background: linear-gradient(135deg, #fff 20%, #00e5ff 60%, #0066ff 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-.status {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-.status-dot {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: #ff4757;
-    transition: all 0.3s;
-}
-.status-dot.connected {
-    background: #00ff88;
-    box-shadow: 0 0 20px rgba(0,255,136,0.5);
-}
-.status-text {
-    font-size: 14px;
-    color: rgba(255,255,255,0.6);
-}
-.status-text.connected {
-    color: #00ff88;
-}
-.main {
-    flex: 1;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    padding: 20px;
-}
-.panel {
-    background: #121826;
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 16px;
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-}
-.panel-title {
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: #00e5ff;
-    margin-bottom: 16px;
-}
-.video-container {
-    flex: 1;
-    background: #000;
-    border-radius: 12px;
-    overflow: hidden;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.video-container img {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-}
-.video-placeholder {
-    color: rgba(255,255,255,0.3);
-    font-size: 14px;
-    text-align: center;
-}
-.depth-container {
-    flex: 1;
-    background: #000;
-    border-radius: 12px;
-    overflow: hidden;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.depth-container img {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-}
-.info-panel {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 20px;
-}
-.guidance-box {
-    background: rgba(0,229,255,0.06);
-    border: 1px solid rgba(0,229,255,0.2);
-    border-radius: 12px;
-    padding: 20px;
-}
-.guidance-label {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.5);
-    margin-bottom: 8px;
-}
-.guidance-text {
-    font-size: 18px;
-    font-weight: 700;
-    line-height: 1.4;
-    color: #fff;
-}
-.guidance-text.CRITICAL { color: #ff4757; }
-.guidance-text.HIGH { color: #ffcc00; }
-.guidance-text.MEDIUM { color: #00e5ff; }
-.objects-box {
-    background: #121826;
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 12px;
-    padding: 20px;
-    max-height: 200px;
-    overflow-y: auto;
-}
-.object-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
-    margin-bottom: 6px;
-    background: rgba(255,255,255,0.04);
-    border-radius: 8px;
-    font-size: 13px;
-}
-.object-item.danger {
-    background: rgba(255,71,87,0.15);
-    border: 1px solid rgba(255,71,87,0.3);
-}
-.object-name {
-    font-weight: 600;
-}
-.object-info {
-    color: rgba(255,255,255,0.5);
-    font-size: 11px;
-}
-.navigation-box {
-    background: rgba(0,255,136,0.06);
-    border: 1px solid rgba(0,255,136,0.2);
-    border-radius: 12px;
-    padding: 20px;
-}
-.nav-direction {
-    font-size: 24px;
-    font-weight: 800;
-    color: #00ff88;
-    margin-bottom: 8px;
-}
-.nav-desc {
-    font-size: 14px;
-    color: rgba(255,255,255,0.7);
-}
-.controls {
-    padding: 20px 30px;
-    background: #121826;
-    border-top: 1px solid rgba(255,255,255,0.08);
-    display: flex;
-    gap: 12px;
-}
-.btn {
-    padding: 12px 24px;
-    border: none;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s;
-}
-.btn-primary {
-    background: linear-gradient(135deg, #00e5ff 0%, #0066ff 100%);
-    color: #000;
-}
-.btn-primary:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(0,229,255,0.3);
-}
-.btn-secondary {
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.2);
-    color: #fff;
-}
-.btn-secondary:hover {
-    background: rgba(255,255,255,0.12);
-}
-.btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none !important;
-}
-.log-panel {
-    grid-column: 1 / -1;
-    background: rgba(0,0,0,0.5);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 12px;
-    padding: 16px;
-    max-height: 150px;
-    overflow-y: auto;
-    font-family: 'Courier New', monospace;
-    font-size: 11px;
-    line-height: 1.8;
-    color: rgba(255,255,255,0.4);
-}
-.log-entry {
-    margin-bottom: 4px;
-}
-.log-entry.info { color: #00e5ff; }
-.log-entry.success { color: #00ff88; }
-.log-entry.error { color: #ff4757; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Visual Guidance System - Central Mission Control (4 AI Models)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #070a12;
+            --bg-card: rgba(14, 20, 33, 0.92);
+            --border-glow: rgba(0, 240, 255, 0.25);
+            --border-card: rgba(255, 255, 255, 0.08);
+            --neon-cyan: #00f0ff;
+            --neon-green: #00ff88;
+            --neon-red: #ff2a55;
+            --neon-amber: #ffb703;
+            --neon-purple: #b5179e;
+            --text-main: #f0f4fc;
+            --text-muted: #8c9cb8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(0, 240, 255, 0.06) 0%, transparent 40%),
+                radial-gradient(circle at 85% 85%, rgba(0, 255, 136, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 50% 50%, rgba(181, 23, 158, 0.04) 0%, transparent 50%);
+        }
+
+        /* HEADER */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 24px;
+            background: rgba(10, 14, 24, 0.95);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border-glow);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--neon-cyan), var(--neon-green));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            box-shadow: 0 0 16px rgba(0, 240, 255, 0.45);
+        }
+
+        .brand h1 {
+            font-size: 1.25rem;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            background: linear-gradient(90deg, #fff, var(--neon-cyan));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand span {
+            font-size: 0.72rem;
+            color: var(--neon-green);
+            font-family: 'JetBrains Mono', monospace;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .header-stats {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .stat-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-family: 'JetBrains Mono', monospace;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: var(--text-muted);
+        }
+
+        .stat-pill.online {
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+            background: rgba(0, 255, 136, 0.12);
+        }
+
+        .stat-pill.cyan {
+            border-color: var(--neon-cyan);
+            color: var(--neon-cyan);
+            background: rgba(0, 240, 255, 0.1);
+        }
+
+        .dot-pulse {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--neon-red);
+            box-shadow: 0 0 8px var(--neon-red);
+            transition: all 0.3s;
+        }
+
+        .dot-pulse.active {
+            background: var(--neon-green);
+            box-shadow: 0 0 10px var(--neon-green);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.7; }
+        }
+
+        /* MAIN CONTENT - 4 CỬA SỔ MODEL GRID */
+        .main-container {
+            flex: 1;
+            padding: 16px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            max-width: 1800px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* 4-WINDOW GRID */
+        .models-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            min-height: 580px;
+        }
+
+        @media (max-width: 1100px) {
+            .models-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .model-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 16px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            transition: border-color 0.3s;
+        }
+
+        .model-card:hover {
+            border-color: var(--border-glow);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .card-title {
+            font-size: 0.88rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-badge {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            padding: 3px 8px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: var(--text-muted);
+        }
+
+        .badge-yolo { border-color: var(--neon-cyan); color: var(--neon-cyan); background: rgba(0, 240, 255, 0.1); }
+        .badge-depth { border-color: var(--neon-green); color: var(--neon-green); background: rgba(0, 255, 136, 0.1); }
+        .badge-sam { border-color: var(--neon-purple); color: #e056fd; background: rgba(181, 23, 158, 0.15); }
+        .badge-spatial { border-color: var(--neon-amber); color: var(--neon-amber); background: rgba(255, 183, 3, 0.12); }
+
+        /* VIEWPORT CANVAS / IMG */
+        .viewport-box {
+            flex: 1;
+            min-height: 280px;
+            background: #000;
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .viewport-box img, .viewport-box video, .viewport-box canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        .viewport-placeholder {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255, 255, 255, 0.35);
+            font-size: 0.85rem;
+            text-align: center;
+            gap: 8px;
+            pointer-events: none;
+        }
+
+        .viewport-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 4px;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+
+        .btn-mini {
+            padding: 5px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.06);
+            color: #fff;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-mini:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: var(--neon-cyan);
+            color: var(--neon-cyan);
+        }
+
+        .btn-mini.active {
+            background: rgba(0, 240, 255, 0.2);
+            border-color: var(--neon-cyan);
+            color: var(--neon-cyan);
+        }
+
+        /* BOTTOM GUIDANCE & NAVIGATION BAR */
+        .bottom-hud {
+            display: grid;
+            grid-template-columns: 1.4fr 1fr 1fr;
+            gap: 16px;
+        }
+
+        @media (max-width: 900px) {
+            .bottom-hud {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .hud-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 16px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .hud-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .guidance-banner {
+            background: linear-gradient(135deg, rgba(0, 240, 255, 0.08), rgba(0, 255, 136, 0.06));
+            border-left: 4px solid var(--neon-cyan);
+            padding: 12px 14px;
+            border-radius: 8px;
+            min-height: 64px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .guidance-banner.CRITICAL, .guidance-banner.DANGER {
+            border-left-color: var(--neon-red);
+            background: rgba(255, 42, 85, 0.12);
+        }
+
+        .guidance-banner.HIGH {
+            border-left-color: var(--neon-amber);
+            background: rgba(255, 183, 3, 0.12);
+        }
+
+        .guidance-icon {
+            font-size: 28px;
+        }
+
+        .guidance-text {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #fff;
+            line-height: 1.35;
+        }
+
+        .nav-direction-display {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 8px 12px;
+        }
+
+        .nav-arrow {
+            font-size: 40px;
+            line-height: 1;
+            filter: drop-shadow(0 0 10px var(--neon-green));
+            animation: bounceArrow 1.2s infinite alternate ease-in-out;
+        }
+
+        @keyframes bounceArrow {
+            from { transform: translateY(-3px); }
+            to { transform: translateY(3px); }
+        }
+
+        .nav-details h3 {
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: var(--neon-green);
+        }
+
+        .nav-details p {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .objects-table {
+            max-height: 110px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .obj-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 10px;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 6px;
+            font-size: 0.78rem;
+        }
+
+        .obj-row.danger {
+            background: rgba(255, 42, 85, 0.15);
+            border: 1px solid rgba(255, 42, 85, 0.35);
+        }
+
+        .obj-name {
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .obj-dist {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--neon-cyan);
+            font-weight: 600;
+        }
+
+        /* CONTROLS BAR */
+        .controls-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 16px;
+            background: rgba(14, 20, 33, 0.8);
+            border: 1px solid var(--border-card);
+            border-radius: 12px;
+        }
+
+        .btn-primary {
+            padding: 10px 20px;
+            border-radius: 10px;
+            border: none;
+            background: linear-gradient(135deg, var(--neon-cyan), #0077ff);
+            color: #000;
+            font-weight: 800;
+            cursor: pointer;
+            font-size: 0.85rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s;
+            box-shadow: 0 4px 16px rgba(0, 240, 255, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 240, 255, 0.5);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, var(--neon-red), #b5179e);
+            color: #fff;
+            box-shadow: 0 4px 16px rgba(255, 42, 85, 0.3);
+        }
+
+        .toggle-switch {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+
+        .toggle-switch input {
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body>
-<div class="header">
-    <h1>📱 Xem Kết Quả Từ Điện Thoại</h1>
-    <div class="status">
-        <div class="status-dot" id="statusDot"></div>
-        <div class="status-text" id="statusText">Chưa kết nối</div>
-    </div>
-</div>
+    <!-- HEADER -->
+    <header>
+        <div class="brand">
+            <div class="brand-icon">🕶️</div>
+            <div>
+                <h1>AI VISUAL GUIDANCE SYSTEM</h1>
+                <span>CENTRAL MISSION CONTROL • 4-AI-MODEL MATRIX</span>
+            </div>
+        </div>
 
-<div class="main">
-    <div class="panel">
-        <div class="panel-title">📹 Video từ điện thoại</div>
-        <div class="video-container" id="videoContainer">
-            <div class="video-placeholder">
-                Chờ điện thoại gửi video...<br>
-                <small>Đảm bảo điện thoại đã kết nối và gửi stream</small>
+        <div class="header-stats">
+            <div class="stat-pill" id="wsPill">
+                <div class="dot-pulse" id="dotPulse"></div>
+                <span id="wsStatusText">CHỜ KẾT NỐI</span>
+            </div>
+            <div class="stat-pill cyan">
+                <span>ĐỘ TRỄ:</span>
+                <strong id="latencyText">-- ms</strong>
+            </div>
+            <div class="stat-pill">
+                <span>FPS:</span>
+                <strong id="fpsText">0</strong>
+            </div>
+            <button class="btn-primary" id="btnConnect" onclick="toggleWebSocket()">
+                <span>⚡</span> <span id="btnConnectText">KẾT NỐI SERVER</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN 4 CỬA SỔ CHO 4 MODEL AI -->
+    <div class="main-container">
+        <div class="models-grid">
+            
+            <!-- MÀN HÌNH 1: YOLO11 REALTIME VISION -->
+            <div class="model-card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span>📹</span> 1. YOLO11 REALTIME VISION (STREAM TỪ ĐIỆN THOẠI)
+                    </div>
+                    <span class="card-badge badge-yolo">30 FPS • BYTETRACK</span>
+                </div>
+                <div class="viewport-box" id="yoloBox">
+                    <img id="yoloImg" src="" alt="YOLO Stream" style="display: none;">
+                    <canvas id="yoloCanvas" style="position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;"></canvas>
+                    <div class="viewport-placeholder" id="yoloPlaceholder">
+                        <span style="font-size: 32px;">📱</span>
+                        <strong>Chờ video stream từ Điện Thoại (Kính Mắt)...</strong>
+                        <p>Mở ứng dụng trên điện thoại và bấm "BẮT ĐẦU QUÉT"</p>
+                    </div>
+                </div>
+                <div class="viewport-toolbar">
+                    <span>Độ phân giải: <strong id="resText">480 x 640</strong></span>
+                    <button class="btn-mini" onclick="toggleRoi()">
+                        <span>📐</span> Ẩn/Hiện Vùng ROI
+                    </button>
+                </div>
+            </div>
+
+            <!-- MÀN HÌNH 2: DEPTH ANYTHING V2 METRIC MAP -->
+            <div class="model-card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span>🌊</span> 2. DEPTH ANYTHING V2 (BẢN ĐỒ ĐỘ SÂU METRIC)
+                    </div>
+                    <span class="card-badge badge-depth">TURBO COLORMAP • METRIC DISTANCE</span>
+                </div>
+                <div class="viewport-box" id="depthBox">
+                    <img id="depthImg" src="" alt="Depth Colormap" style="display: none;">
+                    <div class="viewport-placeholder" id="depthPlaceholder">
+                        <span style="font-size: 32px;">🔮</span>
+                        <strong>Chờ bản đồ độ sâu Depth Anything V2...</strong>
+                        <p>Đang tính toán khoảng cách mét thực tế</p>
+                    </div>
+                </div>
+                <div class="viewport-toolbar">
+                    <span>Thang đo: <span style="color:#ff3366;">Đỏ: Gần (<1.5m)</span> | <span style="color:#00ff88;">Xanh: An toàn (>2.5m)</span></span>
+                    <span id="depthMedianText">Độ sâu trung bình: -- m</span>
+                </div>
+            </div>
+
+            <!-- MÀN HÌNH 3: MOBILESAM / SAM 3 SEGMENTATION -->
+            <div class="model-card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span>🧩</span> 3. MOBILESAM / SAM (PHÂN ĐOẠN TỪNG PIXEL MASK)
+                    </div>
+                    <span class="card-badge badge-sam" id="samBadge">MOBILESAM.PT • ON-DEMAND</span>
+                </div>
+                <div class="viewport-box" id="samBox" style="cursor: crosshair;" onclick="handleSamClick(event)" title="Click vào điểm bất kỳ để phân đoạn vật thể tại điểm đó">
+                    <img id="samImg" src="" alt="SAM Segmentation" style="display: none;">
+                    <div class="viewport-placeholder" id="samPlaceholder">
+                        <span style="font-size: 32px;">🎯</span>
+                        <strong>Mặt Nạ Phân Đoạn SAM (Segment Anything)</strong>
+                        <p>Bấm nút bên dưới hoặc <strong>Click trực tiếp lên ảnh</strong> để phân đoạn</p>
+                    </div>
+                </div>
+                <div class="viewport-toolbar">
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <button class="btn-mini active" id="btnRunSam" onclick="triggerSamSegmentation()">
+                            <span>⚡</span> Phân Đoạn SAM Ngay
+                        </button>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="chkAutoSam" onchange="toggleAutoSam(this.checked)"> Tự động (2.5s)
+                        </label>
+                    </div>
+                    <span id="samInfoText">0 mặt nạ • -- ms</span>
+                </div>
+            </div>
+
+            <!-- MÀN HÌNH 4: SPATIALLM 3D SPATIAL SURVEY -->
+            <div class="model-card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span>🪐</span> 4. SPATIALLM (KHẢO SÁT KHÔNG GIAN PHÒNG 3D)
+                    </div>
+                    <span class="card-badge badge-spatial" id="spatialBadge">NEURIPS 2025 • 3D CUBOIDS</span>
+                </div>
+                <div class="viewport-box" id="spatialBox">
+                    <canvas id="spatial3DCanvas" style="width: 100%; height: 100%;"></canvas>
+                    <video id="spatialVideo" src="/api/v1/sample-3d-video" loop muted style="display: none;"></video>
+                    <div class="viewport-placeholder" id="spatialPlaceholder" style="display: none;">
+                        <span style="font-size: 32px;">📐</span>
+                        <strong>Mô hình Không Gian 3 Chiều SpatialLM</strong>
+                    </div>
+                </div>
+                <div class="viewport-toolbar">
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-mini" id="btnInspectRoom" onclick="inspectRoom3D()">
+                            <span>🔍</span> Khảo Sát 3D Voice
+                        </button>
+                        <button class="btn-mini" id="btnToggle3DVideo" onclick="toggle3DSampleVideo()">
+                            <span>🎬</span> Video Mẫu 3D
+                        </button>
+                    </div>
+                    <span id="spatialStatusText">Tọa độ 3D Camera: Active</span>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- BẢNG DẪN ĐƯỜNG TRUNG TÂM (NAVIGATION & GUIDANCE) -->
+        <div class="bottom-hud">
+            
+            <!-- HƯỚNG DẪN GIỌNG NÓI -->
+            <div class="hud-card">
+                <div class="hud-title">
+                    <span>📢</span> HƯỚNG DẪN & CẢNH BÁO TỨC THÌ (TTS BLACE)
+                </div>
+                <div class="guidance-banner" id="guidanceBanner">
+                    <div class="guidance-icon" id="guidanceIcon">🛡️</div>
+                    <div>
+                        <div class="guidance-text" id="guidanceText">Hệ thống sẵn sàng. Chờ kết nối camera từ điện thoại...</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 3px;" id="guidanceMeta">Ưu tiên: LOW • Lối đi an toàn</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ĐIỀU HƯỚNG 3 LÀN -->
+            <div class="hud-card">
+                <div class="hud-title">
+                    <span>🧭</span> ĐIỀU HƯỚNG LÀN ĐƯỜNG (3-LANE NAVIGATION)
+                </div>
+                <div class="nav-direction-display">
+                    <div class="nav-arrow" id="navArrow">⬆️</div>
+                    <div class="nav-details">
+                        <h3 id="navDirectionText">ĐI THẲNG</h3>
+                        <p id="navDescText">Lối đi phía trước thông thoáng</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- DANH SÁCH VẬT CẢN REALTIME -->
+            <div class="hud-card">
+                <div class="hud-title">
+                    <span>🎯</span> VẬT THỂ NHẬN DIỆN (<span id="objCountBadge">0</span>)
+                </div>
+                <div class="objects-table" id="objectsList">
+                    <div class="obj-row">
+                        <span class="obj-name">Chưa phát hiện vật cản</span>
+                        <span class="obj-dist">--</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- THANH ĐIỀU KHIỂN & PHÁT ÂM THANH MÁY CHỦ -->
+        <div class="controls-bar">
+            <div style="display: flex; gap: 16px; align-items: center;">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="chkTtsWeb" checked> 🔊 Phát giọng nói cảnh báo trên Laptop
+                </label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="chkShowRoi" checked onchange="toggleRoi(this.checked)"> Hiển thị Làn Đường An Toàn (ROI)
+                </label>
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">
+                FastAPI Host: <strong style="color: var(--neon-cyan);">http://127.0.0.1:8000</strong> | WebSocket: <strong style="color: var(--neon-green);">/api/v1/vision/stream</strong>
             </div>
         </div>
     </div>
 
-    <div class="panel">
-        <div class="panel-title">🔮 Depth Map</div>
-        <div class="depth-container" id="depthContainer">
-            <div class="video-placeholder">
-                Chờ dữ liệu depth...
-            </div>
-        </div>
-    </div>
+    <!-- SCRIPT CLIENT -->
+    <script>
+        let ws = null;
+        let isConnected = false;
+        let latestFrameB64 = null;
+        let latestDetections = [];
+        let showRoi = true;
+        let lastFrameTime = performance.now();
+        let frameCounter = 0;
+        let autoSamInterval = null;
+        let is3DVideoPlaying = false;
 
-    <div class="info-panel">
-        <div class="guidance-box">
-            <div class="guidance-label">📢 Hướng dẫn</div>
-            <div class="guidance-text" id="guidanceText">Chờ dữ liệu...</div>
-        </div>
+        // Âm thanh Web Speech API
+        function speakWeb(text) {
+            if (!document.getElementById('chkTtsWeb').checked) return;
+            if (!('speechSynthesis' in window)) return;
+            try {
+                window.speechSynthesis.cancel();
+                const utter = new SpeechSynthesisUtterance(text);
+                utter.lang = 'vi-VN';
+                utter.rate = 1.05;
+                window.speechSynthesis.speak(utter);
+            } catch (e) {
+                console.warn(e);
+            }
+        }
 
-        <div class="navigation-box">
-            <div class="guidance-label">🧭 Điều hướng</div>
-            <div class="nav-direction" id="navDirection">--</div>
-            <div class="nav-desc" id="navDesc">Chờ dữ liệu...</div>
-        </div>
+        // Khởi tạo Canvas Spatial 3D
+        const spatialCanvas = document.getElementById('spatial3DCanvas');
+        const spatialCtx = spatialCanvas.getContext('2d');
+        function resizeSpatialCanvas() {
+            const rect = spatialCanvas.parentElement.getBoundingClientRect();
+            spatialCanvas.width = rect.width || 480;
+            spatialCanvas.height = rect.height || 280;
+        }
+        window.addEventListener('resize', resizeSpatialCanvas);
+        setTimeout(resizeSpatialCanvas, 200);
 
-        <div class="objects-box">
-            <div class="guidance-label">🎯 Vật cản</div>
-            <div id="objectsList">
-                <div style="color: rgba(255,255,255,0.3); font-size: 12px;">Chờ dữ liệu...</div>
-            </div>
-        </div>
-    </div>
+        // Vẽ không gian 3D giả lập trên Màn hình 4
+        function renderSpatial3D(objects) {
+            const w = spatialCanvas.width;
+            const h = spatialCanvas.height;
+            spatialCtx.clearRect(0, 0, w, h);
 
-    <div class="log-panel" id="logPanel">
-        <div class="log-entry info">[INFO] Giao diện đã sẵn sàng. Nhấn "Kết nối" để bắt đầu.</div>
-    </div>
-</div>
+            // Vẽ lưới sàn 3D
+            spatialCtx.strokeStyle = "rgba(0, 240, 255, 0.15)";
+            spatialCtx.lineWidth = 1;
+            const vanishingY = h * 0.42;
+            const centerX = w / 2;
 
-<div class="controls">
-    <button class="btn btn-primary" id="connectBtn" onclick="toggleConnection()">Kết nối</button>
-    <button class="btn btn-secondary" onclick="clearLog()">Xóa log</button>
-</div>
-
-<script>
-let ws = null;
-let isConnected = false;
-let frameCount = 0;
-
-function log(message, type = 'info') {
-    const logPanel = document.getElementById('logPanel');
-    const entry = document.createElement('div');
-    entry.className = `log-entry ${type}`;
-    const time = new Date().toLocaleTimeString();
-    entry.textContent = `[${time}] ${message}`;
-    logPanel.appendChild(entry);
-    logPanel.scrollTop = logPanel.scrollHeight;
-}
-
-function clearLog() {
-    document.getElementById('logPanel').innerHTML = '';
-    log('Đã xóa log', 'info');
-}
-
-function updateStatus(connected) {
-    const dot = document.getElementById('statusDot');
-    const text = document.getElementById('statusText');
-    const btn = document.getElementById('connectBtn');
-
-    if (connected) {
-        dot.classList.add('connected');
-        text.classList.add('connected');
-        text.textContent = 'Đã kết nối';
-        btn.textContent = 'Ngắt kết nối';
-    } else {
-        dot.classList.remove('connected');
-        text.classList.remove('connected');
-        text.textContent = 'Chưa kết nối';
-        btn.textContent = 'Kết nối';
-    }
-}
-
-function toggleConnection() {
-    if (isConnected) {
-        disconnect();
-    } else {
-        connect();
-    }
-}
-
-function connect() {
-    const wsUrl = `ws://${window.location.host}/api/v1/vision/stream`;
-    log(`Đang kết nối đến ${wsUrl}...`, 'info');
-
-    try {
-        ws = new WebSocket(wsUrl);
-
-        ws.onopen = () => {
-            isConnected = true;
-            updateStatus(true);
-            log('Đã kết nối WebSocket thành công!', 'success');
-            // Gửi VIEW_ONLY để báo rằng client này chỉ xem, không gửi video
-            ws.send('VIEW_ONLY');
-        };
-
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            frameCount++;
-
-            if (frameCount % 30 === 1) {
-                log(`Nhận frame #${frameCount} - ${data.objects?.length || 0} objects`, 'info');
+            for (let x = 0; x <= w; x += 35) {
+                spatialCtx.beginPath();
+                spatialCtx.moveTo(x, h);
+                spatialCtx.lineTo(centerX + (x - centerX) * 0.25, vanishingY);
+                spatialCtx.stroke();
             }
 
-            // Update video frame
+            for (let y = h; y >= vanishingY; y -= 24) {
+                const ratio = (y - vanishingY) / (h - vanishingY);
+                const span = (w / 2) * ratio;
+                spatialCtx.beginPath();
+                spatialCtx.moveTo(centerX - span, y);
+                spatialCtx.lineTo(centerX + span, y);
+                spatialCtx.stroke();
+            }
+
+            // Vẽ các khối hộp vật thể 3D nổi
+            if (!objects || objects.length === 0) return;
+            objects.forEach((obj, idx) => {
+                const b = obj.bounding_box || {};
+                const dist = obj.distance_m || 2.5;
+                const pos = obj.position || "center";
+                const isDanger = obj.is_danger;
+
+                // Tính tọa độ chiếu 3D
+                let xNorm = 0.5;
+                if (pos === "left") xNorm = 0.25;
+                else if (pos === "right") xNorm = 0.75;
+                else xNorm = 0.5;
+
+                const depthFactor = Math.max(0.2, Math.min(1.0, 1.0 - (dist / 6.0)));
+                const boxW = Math.max(30, 90 * depthFactor);
+                const boxH = Math.max(35, 110 * depthFactor);
+                const posX = centerX + (xNorm - 0.5) * w * depthFactor * 1.2 - boxW / 2;
+                const posY = vanishingY + (h - vanishingY) * depthFactor * 0.85 - boxH;
+
+                const color = isDanger ? "rgba(255, 42, 85, 0.9)" : "rgba(0, 240, 255, 0.9)";
+                spatialCtx.strokeStyle = color;
+                spatialCtx.lineWidth = 2;
+                spatialCtx.strokeRect(posX, posY, boxW, boxH);
+
+                // Nối đường chiều sâu 3D
+                const depthOffset = 14 * depthFactor;
+                spatialCtx.beginPath();
+                spatialCtx.moveTo(posX, posY);
+                spatialCtx.lineTo(posX + depthOffset, posY - depthOffset);
+                spatialCtx.lineTo(posX + boxW + depthOffset, posY - depthOffset);
+                spatialCtx.lineTo(posX + boxW, posY);
+                spatialCtx.stroke();
+
+                spatialCtx.beginPath();
+                spatialCtx.moveTo(posX + boxW, posY + boxH);
+                spatialCtx.lineTo(posX + boxW + depthOffset, posY + boxH - depthOffset);
+                spatialCtx.lineTo(posX + boxW + depthOffset, posY - depthOffset);
+                spatialCtx.stroke();
+
+                // Tên và khoảng cách 3D
+                spatialCtx.fillStyle = "#fff";
+                spatialCtx.font = "bold 11px 'JetBrains Mono'";
+                const name = obj.class_name_vn || obj.class_name || "Vật";
+                spatialCtx.fillText(`${name} [Z:${dist.toFixed(1)}m]`, posX, posY - depthOffset - 4);
+            });
+        }
+
+        // Kết nối WebSocket
+        function toggleWebSocket() {
+            if (isConnected) {
+                if (ws) ws.close();
+                return;
+            }
+            connectWebSocket();
+        }
+
+        function connectWebSocket() {
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${proto}//${window.location.host}/api/v1/vision/stream`;
+            
+            document.getElementById('wsStatusText').innerText = "ĐANG KẾT NỐI...";
+            try {
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    isConnected = true;
+                    document.getElementById('dotPulse').classList.add('active');
+                    document.getElementById('wsPill').classList.add('online');
+                    document.getElementById('wsStatusText').innerText = "ĐÃ KẾT NỐI";
+                    document.getElementById('btnConnectText').innerText = "NGẮT KẾT NỐI";
+                    document.getElementById('btnConnect').classList.add('btn-danger');
+
+                    // Gửi bản tin VIEW_ONLY để làm màn hình Monitor nhận broadcast
+                    ws.send("VIEW_ONLY");
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        processIncomingData(data);
+                    } catch (e) {
+                        console.error("Lỗi parse WS:", e);
+                    }
+                };
+
+                ws.onerror = (err) => {
+                    console.error("WS error:", err);
+                };
+
+                ws.onclose = () => {
+                    isConnected = false;
+                    document.getElementById('dotPulse').classList.remove('active');
+                    document.getElementById('wsPill').classList.remove('online');
+                    document.getElementById('wsStatusText').innerText = "ĐÃ NGẮT";
+                    document.getElementById('btnConnectText').innerText = "KẾT NỐI SERVER";
+                    document.getElementById('btnConnect').classList.remove('btn-danger');
+                };
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        // Xử lý dữ liệu nhận được từ WebSocket
+        function processIncomingData(data) {
+            // 1. Tính FPS & Latency
+            const now = performance.now();
+            const delta = now - lastFrameTime;
+            lastFrameTime = now;
+            frameCounter++;
+            if (delta > 0) {
+                const fps = Math.round(1000 / delta);
+                document.getElementById('fpsText').innerText = Math.min(30, Math.max(1, fps));
+            }
+
+            // 2. MÀN HÌNH 1: YOLO STREAM
             if (data.frame_b64) {
-                const videoContainer = document.getElementById('videoContainer');
-                videoContainer.innerHTML = `<img src="data:image/jpeg;base64,${data.frame_b64}" alt="Video Frame">`;
+                latestFrameB64 = data.frame_b64;
+                const img = document.getElementById('yoloImg');
+                img.src = `data:image/jpeg;base64,${data.frame_b64}`;
+                img.style.display = "block";
+                document.getElementById('yoloPlaceholder').style.display = "none";
             }
 
-            // Update guidance
-            if (data.guidance && data.guidance.text) {
-                const guidanceEl = document.getElementById('guidanceText');
-                guidanceEl.textContent = data.guidance.text;
-                guidanceEl.className = `guidance-text ${data.guidance.priority || 'MEDIUM'}`;
+            if (data.img_size) {
+                document.getElementById('resText').innerText = `${data.img_size.width} x ${data.img_size.height}`;
             }
 
-            // Update navigation
+            // Vẽ Canvas Bounding Box cho YOLO
+            if (data.objects) {
+                latestDetections = data.objects;
+                drawYoloCanvas(data.objects, data.img_size);
+                renderSpatial3D(data.objects);
+                renderObjectsTable(data.objects);
+            }
+
+            // 3. MÀN HÌNH 2: DEPTH MAP
+            const depthB64 = data.depth_b64 || (data.depth && data.depth.colormap_b64);
+            if (depthB64) {
+                const dImg = document.getElementById('depthImg');
+                dImg.src = `data:image/jpeg;base64,${depthB64}`;
+                dImg.style.display = "block";
+                document.getElementById('depthPlaceholder').style.display = "none";
+            }
+
+            // 4. BẢNG DẪN ĐƯỜNG & LỜI CẢNH BÁO
+            if (data.guidance) {
+                const text = data.guidance.text || "Phía trước an toàn.";
+                const prio = data.guidance.priority || "LOW";
+                const banner = document.getElementById('guidanceBanner');
+                banner.className = `guidance-banner ${prio}`;
+                document.getElementById('guidanceText').innerText = text;
+                document.getElementById('guidanceMeta').innerText = `Mức độ: ${prio} • Phản xạ giọng nói tức thì`;
+
+                let icon = "🛡️";
+                if (prio === "CRITICAL" || prio === "DANGER") icon = "⚠️";
+                else if (prio === "HIGH") icon = "⚡";
+                document.getElementById('guidanceIcon').innerText = icon;
+
+                if (data.guidance.has_person) {
+                    document.getElementById('guidanceMeta').innerText += " • Có người phía trước";
+                }
+            }
+
+            // 5. ĐIỀU HƯỚNG 3 LÀN
             if (data.navigation) {
-                document.getElementById('navDirection').textContent = data.navigation.direction || '--';
-                document.getElementById('navDesc').textContent = data.navigation.description || 'Chờ dữ liệu...';
+                const dir = (data.navigation.direction || "straight").toLowerCase();
+                const arrowEl = document.getElementById('navArrow');
+                const dirTextEl = document.getElementById('navDirectionText');
+                const descEl = document.getElementById('navDescText');
+
+                if (dir === "left") {
+                    arrowEl.innerText = "⬅️";
+                    dirTextEl.innerText = "RẼ TRÁI";
+                    dirTextEl.style.color = "var(--neon-cyan)";
+                } else if (dir === "right") {
+                    arrowEl.innerText = "➡️";
+                    dirTextEl.innerText = "RẼ PHẢI";
+                    dirTextEl.style.color = "var(--neon-cyan)";
+                } else if (dir === "stop") {
+                    arrowEl.innerText = "🛑";
+                    dirTextEl.innerText = "DỪNG LẠI";
+                    dirTextEl.style.color = "var(--neon-red)";
+                } else {
+                    arrowEl.innerText = "⬆️";
+                    dirTextEl.innerText = "ĐI THẲNG";
+                    dirTextEl.style.color = "var(--neon-green)";
+                }
+                descEl.innerText = data.navigation.description || data.navigation.text || "Lối đi thông thoáng";
+            }
+        }
+
+        // Vẽ Canvas Bounding Box cho YOLO
+        function drawYoloCanvas(objects, imgSize) {
+            const canvas = document.getElementById('yoloCanvas');
+            const img = document.getElementById('yoloImg');
+            if (!img || img.clientWidth === 0) return;
+
+            canvas.width = img.clientWidth;
+            canvas.height = img.clientHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const srcW = (imgSize && imgSize.width) || 480;
+            const srcH = (imgSize && imgSize.height) || 640;
+            const scaleX = canvas.width / srcW;
+            const scaleY = canvas.height / srcH;
+
+            // Vẽ vùng ROI hình thang nếu bật
+            if (showRoi) {
+                const topY = canvas.height * 0.40;
+                const botY = canvas.height * 0.98;
+                const topW = canvas.width * 0.38;
+                const botW = canvas.width * 0.82;
+                const centerX = canvas.width / 2;
+
+                ctx.fillStyle = "rgba(0, 255, 136, 0.08)";
+                ctx.strokeStyle = "rgba(0, 255, 136, 0.6)";
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(centerX - topW / 2, topY);
+                ctx.lineTo(centerX + topW / 2, topY);
+                ctx.lineTo(centerX + botW / 2, botY);
+                ctx.lineTo(centerX - botW / 2, botY);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
             }
 
-            // Update objects list
-            if (data.objects && data.objects.length > 0) {
-                const objectsList = document.getElementById('objectsList');
-                objectsList.innerHTML = '';
-                data.objects.slice(0, 10).forEach(obj => {
-                    const item = document.createElement('div');
-                    item.className = `object-item ${obj.in_roi ? 'danger' : ''}`;
-                    item.innerHTML = `
-                        <span class="object-name">${obj.class_name}</span>
-                        <span class="object-info">${obj.position} | ${obj.distance?.level || 'N/A'}</span>
-                    `;
-                    objectsList.appendChild(item);
+            // Vẽ Bounding Boxes
+            objects.forEach(obj => {
+                const b = obj.bounding_box || {};
+                const x1 = b.x1 * scaleX;
+                const y1 = b.y1 * scaleY;
+                const x2 = b.x2 * scaleX;
+                const y2 = b.y2 * scaleY;
+                const w = x2 - x1;
+                const h = y2 - y1;
+
+                const isDanger = obj.is_danger || obj.in_roi;
+                const color = isDanger ? "#ff2a55" : "#00f0ff";
+
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2.5;
+                ctx.strokeRect(x1, y1, w, h);
+
+                // Vẽ nhãn tiếng Việt + khoảng cách mét
+                const name = obj.class_name_vn || obj.class_name || "Vật";
+                const distStr = obj.distance_m ? ` ${obj.distance_m.toFixed(1)}m` : "";
+                const label = `${name}${distStr}`;
+
+                ctx.font = "bold 12px 'Outfit'";
+                const textW = ctx.measureText(label).width;
+                ctx.fillStyle = isDanger ? "rgba(255, 42, 85, 0.85)" : "rgba(0, 240, 255, 0.85)";
+                ctx.fillRect(x1, Math.max(0, y1 - 20), textW + 12, 20);
+
+                ctx.fillStyle = isDanger ? "#fff" : "#000";
+                ctx.fillText(label, x1 + 6, Math.max(14, y1 - 5));
+            });
+        }
+
+        // Bảng danh sách vật cản
+        function renderObjectsTable(objects) {
+            const list = document.getElementById('objectsList');
+            document.getElementById('objCountBadge').innerText = objects.length;
+            if (!objects || objects.length === 0) {
+                list.innerHTML = `<div class="obj-row"><span class="obj-name">Lối đi thông thoáng, không có vật cản</span><span class="obj-dist">--</span></div>`;
+                return;
+            }
+
+            let html = "";
+            objects.forEach(obj => {
+                const name = obj.class_name_vn || obj.class_name;
+                const dist = obj.distance_m ? `${obj.distance_m.toFixed(1)}m` : "--";
+                const isDanger = obj.is_danger || obj.in_roi;
+                const pos = obj.position === "center" ? "Giữa" : (obj.position === "left" ? "Trái" : "Phải");
+                html += `
+                    <div class="obj-row ${isDanger ? 'danger' : ''}">
+                        <span class="obj-name">${isDanger ? '⚠️ ' : ''}${name} (${pos})</span>
+                        <span class="obj-dist">${dist}</span>
+                    </div>
+                `;
+            });
+            list.innerHTML = html;
+        }
+
+        function toggleRoi(val) {
+            showRoi = (val !== undefined) ? val : !showRoi;
+            document.getElementById('chkShowRoi').checked = showRoi;
+            if (latestDetections.length > 0) {
+                drawYoloCanvas(latestDetections);
+            }
+        }
+
+        // ==========================================
+        // 3. XỬ LÝ MODEL SAM (MÀN HÌNH 3)
+        // ==========================================
+        async function triggerSamSegmentation(clickPoint = null) {
+            if (!latestFrameB64) {
+                alert("Chưa có khung hình từ điện thoại. Hãy mở app và quét camera trước!");
+                return;
+            }
+
+            const btn = document.getElementById('btnRunSam');
+            btn.innerText = "⏳ Đang phân đoạn SAM...";
+            btn.disabled = true;
+
+            try {
+                const payload = {
+                    image_b64: latestFrameB64
+                };
+                if (clickPoint) {
+                    payload.x = clickPoint.x;
+                    payload.y = clickPoint.y;
+                }
+
+                const res = await fetch('/api/v1/vision/segment_base64', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
                 });
+                const data = await res.json();
+
+                if (data.success && data.overlay_b64) {
+                    const samImg = document.getElementById('samImg');
+                    samImg.src = `data:image/jpeg;base64,${data.overlay_b64}`;
+                    samImg.style.display = "block";
+                    document.getElementById('samPlaceholder').style.display = "none";
+                    document.getElementById('samInfoText').innerText = `${data.count} mặt nạ • ${data.elapsed_ms}ms`;
+                } else if (data.error) {
+                    alert(`Lỗi SAM: ${data.error}`);
+                }
+            } catch (err) {
+                console.error("Lỗi gọi SAM:", err);
+            } finally {
+                btn.innerText = "⚡ Phân Đoạn SAM Ngay";
+                btn.disabled = false;
             }
+        }
 
-            // Update depth if available
-            if (data.depth && data.depth.colormap_b64) {
-                const depthContainer = document.getElementById('depthContainer');
-                depthContainer.innerHTML = `<img src="data:image/jpeg;base64,${data.depth.colormap_b64}" alt="Depth Map">`;
+        function handleSamClick(event) {
+            const samBox = document.getElementById('samBox');
+            const rect = samBox.getBoundingClientRect();
+            const clickX = event.clientX - rect.left;
+            const clickY = event.clientY - rect.top;
+
+            // Ánh xạ sang tỷ lệ frame 480x640
+            const xNorm = (clickX / rect.width) * 480;
+            const yNorm = (clickY / rect.height) * 640;
+
+            triggerSamSegmentation({ x: Math.round(xNorm), y: Math.round(yNorm) });
+        }
+
+        function toggleAutoSam(enable) {
+            if (enable) {
+                autoSamInterval = setInterval(() => {
+                    if (latestFrameB64) triggerSamSegmentation();
+                }, 2500);
+            } else {
+                if (autoSamInterval) clearInterval(autoSamInterval);
+                autoSamInterval = null;
             }
+        }
+
+        // ==========================================
+        // 4. XỬ LÝ MODEL SPATIALLM (MÀN HÌNH 4)
+        // ==========================================
+        async function inspectRoom3D() {
+            const btn = document.getElementById('btnInspectRoom');
+            btn.innerText = "⏳ Đang khảo sát...";
+            btn.disabled = true;
+
+            try {
+                let formData = new FormData();
+                if (latestFrameB64) {
+                    // Chuyển base64 sang blob ảnh để gửi
+                    const byteChars = atob(latestFrameB64);
+                    const byteNums = new Array(byteChars.length);
+                    for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
+                    const byteArray = new Uint8Array(byteNums);
+                    const blob = new Blob([byteArray], { type: 'image/jpeg' });
+                    formData.append('image', blob, 'frame.jpg');
+                }
+                formData.append('prompt', 'Khảo sát cấu trúc không gian 3D phòng');
+
+                const res = await fetch('/api/v1/spatial/inspect-room', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.vietnamese_description) {
+                    document.getElementById('guidanceText').innerText = data.vietnamese_description;
+                    speakWeb(data.vietnamese_description);
+                    if (data.objects_3d) {
+                        renderSpatial3D(data.objects_3d);
+                    }
+                }
+            } catch (err) {
+                console.error("Lỗi SpatialLM:", err);
+            } finally {
+                btn.innerText = "🔍 Khảo Sát 3D Voice";
+                btn.disabled = false;
+            }
+        }
+
+        function toggle3DSampleVideo() {
+            const video = document.getElementById('spatialVideo');
+            const canvas = document.getElementById('spatial3DCanvas');
+            const btn = document.getElementById('btnToggle3DVideo');
+
+            is3DVideoPlaying = !is3DVideoPlaying;
+            if (is3DVideoPlaying) {
+                video.style.display = "block";
+                canvas.style.display = "none";
+                video.play();
+                btn.innerText = "⏹ Dừng Video 3D";
+                btn.classList.add('active');
+            } else {
+                video.pause();
+                video.style.display = "none";
+                canvas.style.display = "block";
+                btn.innerText = "🎬 Video Mẫu 3D";
+                btn.classList.remove('active');
+            }
+        }
+
+        // Tự động kết nối WebSocket khi mở trang
+        window.onload = () => {
+            connectWebSocket();
         };
-
-        ws.onerror = (error) => {
-            log('Lỗi WebSocket: ' + error, 'error');
-        };
-
-        ws.onclose = () => {
-            isConnected = false;
-            updateStatus(false);
-            log('Đã ngắt kết nối', 'info');
-        };
-    } catch (error) {
-        log('Lỗi kết nối: ' + error.message, 'error');
-    }
-}
-
-function disconnect() {
-    if (ws) {
-        ws.close();
-        ws = null;
-    }
-    isConnected = false;
-    updateStatus(false);
-}
-
-// Auto-connect on load (optional)
-// window.onload = () => connect();
-</script>
+    </script>
 </body>
 </html>
