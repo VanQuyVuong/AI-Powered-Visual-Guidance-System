@@ -395,52 +395,23 @@ class DepthService:
                     })
                     known_boxes.append({"x1": bx1, "y1": by1, "x2": bx2, "y2": by2})
 
-        # 2. Quét vùng trung tâm trước mặt (y=25% -> 80%) để phát hiện BỨC TƯỜNG hoặc khối vật cản chắn lối đi
-        x_min, x_max = int(w * 0.25), int(w * 0.75)
-        y_min, y_max = int(h * 0.25), int(h * 0.80)
-        corridor_depth = dmap[y_min:y_max, x_min:x_max]
+        # 2. PHÁT HIỆN HÌNH HỌC BẰNG GRADIENT ĐỘ SÂU: BỨC TƯỜNG (WALL) & BẬC TAM CẤP (STAIRS)
+        try:
+            from app.vision.geometric_hazard_detector import geometric_hazard_detector
 
-        if corridor_depth.size > 0:
-            med_dist = float(np.median(corridor_depth))
-            p15_dist = float(np.percentile(corridor_depth, 15))
-            target_dist = p15_dist if p15_dist < 1.8 else med_dist
+            # A. Bức tường chắn trước mặt (Vertical Surface Plane)
+            wall_hazard = geometric_hazard_detector.detect_wall(dmap, known_boxes=known_boxes)
+            if wall_hazard:
+                results.append(wall_hazard)
+                known_boxes.append(wall_hazard["bounding_box"])
 
-            if target_dist <= 2.5 and not _is_covered_by_yolo(x_min, y_min, x_max, y_max, thresh=0.30):
-                corridor_area = float((x_max - x_min) * (y_max - y_min))
-                mask_close = (corridor_depth <= target_dist + 0.45).astype(np.uint8)
-                if np.sum(mask_close) >= (corridor_area * 0.12):
-                    bx1 = int(x_min + (x_max - x_min) * 0.10)
-                    bx2 = int(x_max - (x_max - x_min) * 0.10)
-                    by1 = int(y_min + (y_max - y_min) * 0.10)
-                    by2 = int(y_max)
-
-                    cls_en, cls_vn = self._classify_front_region(bx1, by1, bx2, by2)
-
-                    # Tránh báo nhầm sàn nhà khi cúi thấp camera
-                    is_floor_only = False
-                    if smap is not None and self.seg_loaded and self.seg_model is not None:
-                        patch = smap[by1:by2, bx1:bx2]
-                        if patch.size > 0:
-                            v, c = np.unique(patch, return_counts=True)
-                            dom_id = int(v[np.argmax(c)])
-                            dom_lbl = getattr(self.seg_model.config, "id2label", {}).get(dom_id, "").lower()
-                            dom_parts = [p.strip() for p in dom_lbl.replace(";", ",").split(",")]
-                            if any(p in ("floor", "flooring", "road", "sidewalk", "rug", "carpet") for p in dom_parts) and target_dist > 1.2:
-                                is_floor_only = True
-
-                    if not is_floor_only:
-                        obj_dist = round(target_dist, 1)
-                        results.append({
-                            "class_name": cls_en,
-                            "class_name_vn": cls_vn,
-                            "confidence": 0.85,
-                            "position": "center",
-                            "distance_m": obj_dist,
-                            "bounding_box": {"x1": bx1, "y1": by1, "x2": bx2, "y2": by2},
-                            "in_roi": True,
-                            "is_danger": obj_dist <= 2.5,
-                            "is_unknown": True,
-                        })
+            # B. Bậc tam cấp / Cầu thang dưới chân (Horizontal Edges + Depth Step Jump)
+            stairs_hazard = geometric_hazard_detector.detect_stairs_and_curbs(frame_bgr, dmap, known_boxes=known_boxes)
+            if stairs_hazard:
+                results.append(stairs_hazard)
+                known_boxes.append(stairs_hazard["bounding_box"])
+        except Exception as _geo_err:
+            pass
 
         # 3. Gắn thêm ổ gà nếu phát hiện được
         for ph in self.get_latest_potholes():

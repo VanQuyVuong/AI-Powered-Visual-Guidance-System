@@ -149,6 +149,8 @@ VOCAB = {
     "column": "cột nhà",
     "pillar": "cột nhà",
     "cabinet": "tủ",
+    "step": "bậc tam cấp",
+    "curb": "bậc tam cấp",
     "obstacle": "vật cản",
     "pothole": "ổ gà"
 }
@@ -180,7 +182,26 @@ def generate_guidance(detections: list) -> dict:
         return (pos_score, dist)
         
     sorted_dets = sorted(detections, key=_sort_key)
-    
+
+    # Kiểm tra trường hợp đặc biệt: Có vật cản chắn ngang cửa ra vào
+    door_det = next((d for d in sorted_dets if getattr(d, "class_name", "") == "door" and getattr(d, "confidence", 0.0) >= 0.40), None)
+    if door_det:
+        door_dist = getattr(door_det, "distance_m", None) or getattr(door_det, "dist_m", None) or 3.0
+        door_pos = getattr(door_det, "position", "center")
+        for d in sorted_dets:
+            c = getattr(d, "class_name", "")
+            if c and c != "door" and getattr(d, "confidence", 0.0) >= 0.40:
+                obs_dist = getattr(d, "distance_m", None) or getattr(d, "dist_m", None) or 2.0
+                obs_pos = getattr(d, "position", "center")
+                if (obs_pos == door_pos or obs_pos == "center") and obs_dist <= door_dist:
+                    obs_name = VOCAB.get(c.lower().strip(), c)
+                    d_txt = f"{round(obs_dist)} mét " if obs_dist and obs_dist > 0 else ""
+                    return {
+                        "text": f"Phía trước {d_txt}có {obs_name} chắn ngang cửa ra vào.".replace("  ", " "),
+                        "has_person": c == "person",
+                        "priority": "HIGH"
+                    }
+
     for det in sorted_dets:
         conf = getattr(det, "confidence", 0.0)
         # Bỏ qua các nhận diện có độ tin cậy thấp (< 0.40) theo chuẩn Unit Test

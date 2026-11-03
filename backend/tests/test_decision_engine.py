@@ -157,6 +157,28 @@ class TestGenerateGuidance:
         assert result is not None
         assert "umbrella" in result["text"]
 
+    def test_door_blocked_by_obstacle(self):
+        """Vật cản (ghế) chắn trước cửa ra vào → sinh câu cảnh báo chắn ngang cửa."""
+        chair = Detection(
+            class_name="chair",
+            confidence=0.85,
+            position="center",
+            distance_m=1.2,
+            bounding_box=BoundingBox(x1=200, y1=200, x2=400, y2=400)
+        )
+        door = Detection(
+            class_name="door",
+            confidence=0.88,
+            position="center",
+            distance_m=2.5,
+            bounding_box=BoundingBox(x1=150, y1=100, x2=450, y2=450)
+        )
+        result = generate_guidance([chair, door])
+        assert result is not None
+        assert "chắn ngang cửa ra vào" in result["text"].lower()
+        assert "ghế" in result["text"].lower()
+        assert result["priority"] == "HIGH"
+
 
 # ==========================================
 # TEST 3: is_in_roi()
