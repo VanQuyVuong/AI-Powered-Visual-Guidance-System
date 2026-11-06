@@ -4,26 +4,38 @@ Kết hợp YOLOv8/11 + ByteTrack + Depth Anything V2 + SegFormer + Tactile Pavi
 để tạo dữ liệu hướng dẫn thời gian thực cho người khiếm thị.
 """
 
+import time
 import threading
+from typing import Optional
 import cv2
 import numpy as np
 
 from app.schemas.vision import Detection, BoundingBox
 from app.vision.yolo_service import run_tracking
-from app.vision.decision_engine import is_in_roi, determine_position, generate_guidance, get_vietnamese_name
+from app.vision.decision_engine import (
+    is_in_roi,
+    determine_position,
+    generate_guidance,
+    build_navigation_speech,
+    generate_navigation_direction,
+    get_mode,
+    get_vietnamese_name,
+)
 from app.vision.tactile_paving_detector import detect_tactile_paving
 from app.vision.depth_service import depth_service
 from app.vision.distance_estimator import estimate_distance_m
+from app.vision.sam_service import sam_service
 
 # Danh mục các vật cản & đồ vật thực tế trong nhà và ngoài đường
 OBSTACLE_CLASSES = {
     "person", "chair", "couch", "table", "dining table", "bed", "bench",
     "backpack", "handbag", "suitcase", "cell phone", "bottle", "cup",
-    "wine glass", "bowl", "laptop", "tv", "keyboard", "mouse", "book",
+    "wine glass", "bowl", "book", "laptop", "tv", "keyboard", "mouse",
     "potted plant", "refrigerator", "sink", "clock", "vase",
     "dog", "cat", "car", "motorcycle", "bicycle", "bus", "truck",
-    "door", "stairs", "stop sign", "traffic light", "fire hydrant",
-    "wall", "column", "pillar", "cabinet", "obstacle", "pothole"
+    "door", "stairs", "stair", "step", "curb", "doorstep", "threshold",
+    "stop sign", "traffic light", "fire hydrant",
+    "wall", "column", "pillar", "cabinet", "obstacle", "multi_obstacle", "pothole"
 }
 
 # Các lớp đồ vật lớn
@@ -32,10 +44,17 @@ LARGE_FALSE_POSITIVE_CLASSES = {"bed", "couch"}
 # YOLO tracker giữ trạng thái chung -> chỉ cho 1 luồng suy luận chạy tại một thời điểm
 _inference_lock = threading.Lock()
 
+# Bộ điều khiển giọng nói dẫn đường (bước sang bên / quét có hướng dẫn khi bị chắn kín)
+from app.vision.guided_scan import (  # noqa: E402
+    voice_state as _voice_state,
+    reset_voice_state,
+    update_spatial_scan_and_voice,
+)
 
-def analyze_frame_sync(image_bytes: bytes) -> dict:
+
+def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
     """
-    Toàn bộ phần xử lý nặng (YOLO + Depth Anything V2 + SegFormer + Pothole + Tactile Paving).
+    Toàn bộ phần xử lý nặng (YOLO + Depth Anything V2 + SegFormer + Geometric Hazard + Tactile Paving).
     Hàm đồng bộ chạy trong threadpool (asyncio.to_thread).
     """
     if not image_bytes:
@@ -51,6 +70,9 @@ def analyze_frame_sync(image_bytes: bytes) -> dict:
 
     with _inference_lock:
         raw_detections, img_width, img_height = run_tracking(image_bytes)
+
+    # Kích hoạt EdgeSAM chạy ngầm bổ trợ mặt nạ pixel (0ms latency cho luồng chính)
+    sam_service.trigger_async_support(frame_bgr, raw_detections)
 
     is_on_tactile = detect_tactile_paving(image_bytes)
     dmap = depth_service.get_latest_depth_map()
@@ -85,17 +107,19 @@ def analyze_frame_sync(image_bytes: bytes) -> dict:
         pos = determine_position(box["x1"], box["x2"], img_width)
         is_person = (cname == "person")
 
-        # 2. Ưu tiên lấy khoảng cách mét thật từ Depth Anything V2 nếu có
-        metric_dist = depth_service.get_box_median_depth(box["x1"], box["y1"], box["x2"], box["y2"], dmap)
+        # 2. Ưu tiên lấy khoảng cách mét tinh chỉnh theo Pixel Mask của EdgeSAM + Depth Anything V2
+        sam_mask_dist = sam_service.get_mask_refined_depth(box, dmap)
+        metric_dist = sam_mask_dist or depth_service.get_box_median_depth(box["x1"], box["y1"], box["x2"], box["y2"], dmap)
         if metric_dist is not None and 0.2 <= metric_dist <= 15.0:
             dist_m = metric_dist
         else:
             dist_m = estimate_distance_m(cname, box, img_width, img_height)
 
         box_h_ratio = (box["y2"] - box["y1"]) / float(max(1, img_height))
-        # 3. Tiêu chí nguy hiểm: Trong hành lang, ở trung tâm, chiếm kích thước đáng kể hoặc trong phạm vi <= 3.5 mét
-        in_path = in_corridor or (pos == "center") or (box_h_ratio >= 0.20) or (dist_m <= 2.8)
-        is_danger = in_path and (dist_m <= 3.5)
+        overlaps_center = (box["x1"] < 0.65 * img_width and box["x2"] > 0.35 * img_width)
+        # 3. Tiêu chí nguy hiểm: Trong hành lang hoặc ở làn giữa (<= 3.0m), hoặc ở hai bên nhưng rất gần (<= 2.2m)
+        in_path = in_corridor or (pos == "center") or overlaps_center or (box_h_ratio >= 0.25)
+        is_danger = (in_path and dist_m <= 3.0) or (dist_m <= 2.2)
 
         # Chuẩn hóa confidence >= 0.40 cho các đồ vật nhỏ đã qua lọc
         effective_conf = max(conf, 0.42)
@@ -129,10 +153,13 @@ def analyze_frame_sync(image_bytes: bytes) -> dict:
             "is_danger": is_danger
         })
 
-    # 4. PHÁT HIỆN BỨC TƯỜNG, CẦU THANG, Ổ GÀ & VẬT CẢN LẠ QUA DEPTH ANYTHING V2 + SEGFORMER
-    if frame_bgr is not None and dmap is not None:
+    # 4. LUÔN CHẠY PHÁT HIỆN BỨC TƯỜNG, BẬC THỀM, CẦU THANG & VẬT CẢN LẠ (KẾT HỢP DEPTH + GEOMETRIC + EDGESAM)
+    if frame_bgr is not None:
         known_boxes = [d["bounding_box"] for d in raw_detections]
         unknown_obstacles = depth_service.detect_unknown_obstacles(frame_bgr, known_boxes, dmap)
+        # Bổ sung vật cản lớn từ mặt nạ EdgeSAM nếu YOLO & bộ dò hình học chưa bắt được
+        if not unknown_obstacles and not all_objects:
+            unknown_obstacles = sam_service.get_unlabeled_mask_obstacles(all_objects, dmap, img_width, img_height)
         for unk in unknown_obstacles:
             all_objects.append(unk)
             if unk.get("is_danger", True):
@@ -149,9 +176,14 @@ def analyze_frame_sync(image_bytes: bytes) -> dict:
                 )
                 roi_detections.append(unk_det)
 
-    # 5. Nếu có vật thể mà roi_detections đang trống, đưa vật gần nhất vào để cảnh báo
+    # 5. Chỉ đưa thêm các vật ở gần vào roi_detections nếu roi_detections đang trống
+    # (Tường chỉ đưa vào khi <= 1.35m, các vật cản khác <= 2.8m)
     if not roi_detections and all_objects:
-        nearest = sorted(all_objects, key=lambda o: o.get("distance_m") or 9.9)[:2]
+        near_objs = [
+            o for o in all_objects
+            if (o.get("distance_m") or 9.9) <= (1.35 if o.get("class_name") == "wall" else 2.8)
+        ]
+        nearest = sorted(near_objs, key=lambda o: o.get("distance_m") or 9.9)[:4]
         for obj in nearest:
             obj["is_danger"] = True
             roi_detections.append(
@@ -167,22 +199,59 @@ def analyze_frame_sync(image_bytes: bytes) -> dict:
                 )
             )
 
-    guidance_data = generate_guidance(roi_detections) or {"text": "", "priority": "LOW"}
+    # 5b. BỘ NHỚ CHỐNG RUNG TAY 2.0 GIÂY CHO VẬT CẢN Ở GIỮA:
+    now = time.time()
+    center_objs_now = [o for o in all_objects if o.get("position") == "center"]
+    _voice_state["history"] = [(t, cnt) for (t, cnt) in _voice_state["history"] if (now - t) <= 2.0]
+    _voice_state["history"].append((now, len(center_objs_now)))
+    max_recent_center = max((cnt for _, cnt in _voice_state["history"]), default=0)
+
+    effective_objects_for_speech = list(all_objects)
+    if len(center_objs_now) == 1 and len(all_objects) == 1 and max_recent_center >= 2:
+        # Giữ nguyên trạng thái nhiều vật cản ở giữa khi tay rung nhẹ làm rớt bớt box
+        effective_objects_for_speech.append(all_objects[0])
+
+    # 6. Thuật toán điều hướng 3 làn (Navigation: straight/left/right/stop + Depth 3-Lane Free-Space)
+    nav_data = generate_navigation_direction(roi_detections, img_width, img_height)
+    depth_lanes = depth_service.analyze_three_lanes_depth(dmap)
+    if depth_lanes.get("has_depth"):
+        nav_data["depth_lanes"] = depth_lanes["lanes"]
+
+    # 7. Sinh câu hướng dẫn gom nhóm + chỉ đường (Đi thẳng / Rẽ trái / Rẽ phải / Nhìn trái phải)
+    base_guidance = generate_guidance(roi_detections)
+    guidance_data = build_navigation_speech(
+        base_guidance, effective_objects_for_speech, nav_data, img_width, depth_lanes=depth_lanes
+    )
 
     if is_on_tactile:
-        if guidance_data["text"]:
+        if base_guidance and base_guidance.get("text"):
             guidance_data["text"] = "Đang ở trên vạch dẫn đường. " + guidance_data["text"]
         else:
-            guidance_data["text"] = "Đang đi đúng vạch dẫn đường."
+            guidance_data["text"] = "Đang đi đúng vạch dẫn đường, tiếp tục đi thẳng."
             guidance_data["priority"] = "LOW"
-    elif not guidance_data["text"]:
-        guidance_data["text"] = "Phía trước an toàn."
 
-    # 6. Thuật toán điều hướng 3 làn (Navigation: straight/left/right/stop)
-    from app.vision.decision_engine import generate_navigation_direction, get_mode
-    nav_data = generate_navigation_direction(roi_detections, img_width, img_height)
+    # 8. BỘ NHỚ QUÉT XUNG QUANH & DẪN ĐƯỜNG 3 GIAI ĐOẠN (Báo cản -> Nhìn trái/phải ghi nhớ -> Chỉ hướng né -> Đi tiếp)
+    cur_text, cur_prio, should_speak_now = update_spatial_scan_and_voice(
+        guidance_data.get("text", ""),
+        guidance_data.get("priority", "LOW"),
+        all_objects,
+        depth_lanes,
+        img_width,
+        now,
+    )
+    guidance_data["priority"] = cur_prio
 
-    # 7. Mã hóa frame_b64 và depth_b64 phục vụ xem trực tiếp trên web monitor (/view-phone)
+    if should_speak_now:
+        guidance_data["display_text"] = cur_text
+        guidance_data["text"] = cur_text
+    else:
+        guidance_data["display_text"] = _voice_state["last_text"] or cur_text
+        if is_stream:
+            guidance_data["text"] = ""
+        else:
+            guidance_data["text"] = cur_text
+
+    # 9. Mã hóa frame_b64 và depth_b64 phục vụ xem trực tiếp trên web monitor (/view-phone)
     import base64
     frame_b64 = None
     if frame_bgr is not None:
@@ -193,7 +262,7 @@ def analyze_frame_sync(image_bytes: bytes) -> dict:
             pass
 
     depth_b64 = None
-    cur_dmap = dmap if dmap is not None else depth_service.get_latest_depth_map()
+    cur_dmap = dmap if dmap is not None else depth_service.get_or_create_display_depth_map(frame_bgr)
     if cur_dmap is not None:
         try:
             d_norm = cv2.normalize(cur_dmap, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)

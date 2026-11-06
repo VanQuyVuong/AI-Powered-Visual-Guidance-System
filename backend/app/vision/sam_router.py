@@ -28,13 +28,16 @@ from app.vision.sam_service import sam_service
 
 router = APIRouter(prefix="/api/v1/vision", tags=["sam-segmentation"])
 
-MAX_BOXES = 12  # giới hạn để CPU không bị quá tải
+MAX_BOXES = 6  # giới hạn số box ưu tiên nhất để MobileSAM chạy nhanh trên CPU (~0.5-1s)
 
 
 def _render_mask_overlay(frame: np.ndarray, objects: list) -> Optional[str]:
     """Tạo ảnh overlay vẽ mặt nạ phân đoạn màu sắc bán trong suốt dạng Base64 JPEG."""
-    if frame is None or not objects:
+    if frame is None:
         return None
+    if not objects:
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return base64.b64encode(buf).decode("utf-8")
     try:
         overlay = frame.copy()
         rng = np.random.default_rng(42)
@@ -66,7 +69,12 @@ def _render_mask_overlay(frame: np.ndarray, objects: list) -> Optional[str]:
         return None
 
 
-def _segment_sync(image_bytes: bytes, x: Optional[float] = None, y: Optional[float] = None) -> dict:
+def _segment_sync(
+    image_bytes: bytes,
+    x: Optional[float] = None,
+    y: Optional[float] = None,
+    existing_dets: Optional[list] = None,
+) -> dict:
     nparr = np.frombuffer(image_bytes, np.uint8)
     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR) if nparr.size > 0 else None
     if frame is None:
@@ -79,23 +87,32 @@ def _segment_sync(image_bytes: bytes, x: Optional[float] = None, y: Optional[flo
         segs = sam_service.segment_points(frame, [[x, y]])
         objects = [{"class_name": "object", "class_name_vn": "vật thể", "confidence": None, **s} for s in segs]
     else:
-        # Chế độ 2: YOLO lấy hộp -> SAM vẽ mặt nạ (Promptable Box)
-        from app.vision.pipeline import _inference_lock
-        from app.vision.yolo_service import run_inference
-
-        with _inference_lock:  # dùng chung model YOLO với luồng realtime
+        # Chế độ 2: Dùng ngay các hộp YOLO sẵn có từ WebSocket (KHÔNG khóa _inference_lock của YOLO!)
+        if existing_dets is not None:
+            dets = [
+                d for d in existing_dets
+                if isinstance(d, dict) and "bounding_box" in d and all(k in d["bounding_box"] for k in ("x1", "y1", "x2", "y2"))
+            ]
+        else:
+            from app.vision.yolo_service import run_inference
             dets, _ = run_inference(image_bytes)
-        dets = sorted(dets, key=lambda d: d["confidence"], reverse=True)[:MAX_BOXES]
-        boxes = [[d["bounding_box"][k] for k in ("x1", "y1", "x2", "y2")] for d in dets]
-        segs = sam_service.segment_boxes(frame, boxes)
-        objects = []
-        for d, s in zip(dets, segs):
-            objects.append({
-                "class_name": d["class_name"],
-                "class_name_vn": get_vietnamese_name(d["class_name"]),
-                "confidence": d["confidence"],
-                **s,
-            })
+
+        dets = sorted(dets, key=lambda d: d.get("confidence") or 0.5, reverse=True)[:MAX_BOXES]
+        if dets:
+            boxes = [[d["bounding_box"][k] for k in ("x1", "y1", "x2", "y2")] for d in dets]
+            segs = sam_service.segment_boxes(frame, boxes)
+            objects = []
+            for d, s in zip(dets, segs):
+                objects.append({
+                    "class_name": d.get("class_name", "object"),
+                    "class_name_vn": d.get("class_name_vn") or get_vietnamese_name(d.get("class_name", "object")),
+                    "confidence": d.get("confidence"),
+                    **s,
+                })
+        else:
+            # Nếu khung hình không có hộp YOLO nào (VD: đang nhìn vào bức tường hoặc bậc thềm), phân đoạn tâm ảnh
+            segs = sam_service.segment_points(frame, [[w * 0.5, h * 0.55]])
+            objects = [{"class_name": "surface", "class_name_vn": "bề mặt phía trước", "confidence": None, **s} for s in segs]
 
     if not objects and sam_service.load_error:
         raise RuntimeError(f"SAM không khả dụng: {sam_service.load_error}")
@@ -117,6 +134,7 @@ class SamBase64Request(BaseModel):
     image_b64: str
     x: Optional[float] = None
     y: Optional[float] = None
+    detections: Optional[list] = None
 
 
 @router.get("/segment/status")
@@ -138,7 +156,7 @@ async def sam_segment(
     if not image_bytes:
         raise HTTPException(status_code=400, detail="Ảnh rỗng (INVALID_IMAGE)")
     try:
-        return await asyncio.to_thread(_segment_sync, image_bytes, x, y)
+        return await asyncio.to_thread(_segment_sync, image_bytes, x, y, None)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -147,13 +165,13 @@ async def sam_segment(
 
 @router.post("/segment_base64")
 async def sam_segment_base64(req: SamBase64Request):
-    """API phân đoạn SAM nhận trực tiếp frame Base64 từ WebSocket stream của điện thoại."""
+    """API phân đoạn SAM nhận trực tiếp frame Base64 + hộp YOLO có sẵn từ WebSocket stream."""
     try:
         data = req.image_b64
         if "," in data:
             data = data.split(",", 1)[1]
         image_bytes = base64.b64decode(data)
-        return await asyncio.to_thread(_segment_sync, image_bytes, req.x, req.y)
+        return await asyncio.to_thread(_segment_sync, image_bytes, req.x, req.y, req.detections)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
