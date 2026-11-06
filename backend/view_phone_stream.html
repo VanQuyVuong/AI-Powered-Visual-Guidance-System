@@ -242,6 +242,10 @@
             display: block;
         }
 
+        .viewport-box canvas#yoloCanvas {
+            object-fit: fill;
+        }
+
         .viewport-placeholder {
             position: absolute;
             inset: 0;
@@ -555,13 +559,13 @@
                 </div>
             </div>
 
-            <!-- MÀN HÌNH 3: MOBILESAM / SAM 3 SEGMENTATION -->
+            <!-- MÀN HÌNH 3: EDGESAM / SAM SEGMENTATION -->
             <div class="model-card">
                 <div class="card-header">
                     <div class="card-title">
-                        <span>🧩</span> 3. MOBILESAM / SAM (PHÂN ĐOẠN TỪNG PIXEL MASK)
+                        <span>🧩</span> 3. EDGESAM / SAM (PHÂN ĐOẠN TỪNG PIXEL MASK)
                     </div>
-                    <span class="card-badge badge-sam" id="samBadge">MOBILESAM.PT • ON-DEMAND</span>
+                    <span class="card-badge badge-sam" id="samBadge">EDGESAM (REP-VIT) • AUTO</span>
                 </div>
                 <div class="viewport-box" id="samBox" style="cursor: crosshair;" onclick="handleSamClick(event)" title="Click vào điểm bất kỳ để phân đoạn vật thể tại điểm đó">
                     <img id="samImg" src="" alt="SAM Segmentation" style="display: none;">
@@ -577,7 +581,7 @@
                             <span>⚡</span> Phân Đoạn SAM Ngay
                         </button>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="chkAutoSam" onchange="toggleAutoSam(this.checked)"> Tự động (2.5s)
+                            <input type="checkbox" id="chkAutoSam" checked onchange="toggleAutoSam(this.checked)"> Tự động (2.5s)
                         </label>
                     </div>
                     <span id="samInfoText">0 mặt nạ • -- ms</span>
@@ -888,14 +892,23 @@
                 document.getElementById('depthPlaceholder').style.display = "none";
             }
 
+            // 3b. MÀN HÌNH 3: TỰ ĐỘNG BẬT MOBILESAM Ở FRAME ĐẦU TIÊN
+            const samImgEl = document.getElementById('samImg');
+            const autoSamChk = document.getElementById('chkAutoSam');
+            if (samImgEl && samImgEl.style.display === "none" && (!autoSamChk || autoSamChk.checked) && !isSamRunning) {
+                triggerSamSegmentation(null, true);
+            }
+
             // 4. BẢNG DẪN ĐƯỜNG & LỜI CẢNH BÁO
             if (data.guidance) {
-                const text = data.guidance.text || "Phía trước an toàn.";
+                const text = data.guidance.display_text || data.guidance.text;
                 const prio = data.guidance.priority || "LOW";
-                const banner = document.getElementById('guidanceBanner');
-                banner.className = `guidance-banner ${prio}`;
-                document.getElementById('guidanceText').innerText = text;
-                document.getElementById('guidanceMeta').innerText = `Mức độ: ${prio} • Phản xạ giọng nói tức thì`;
+                if (text) {
+                    const banner = document.getElementById('guidanceBanner');
+                    banner.className = `guidance-banner ${prio}`;
+                    document.getElementById('guidanceText').innerText = text;
+                    document.getElementById('guidanceMeta').innerText = `Mức độ: ${prio} • Chống lặp giọng nói thông minh`;
+                }
 
                 let icon = "🛡️";
                 if (prio === "CRITICAL" || prio === "DANGER") icon = "⚠️";
@@ -935,29 +948,52 @@
             }
         }
 
-        // Vẽ Canvas Bounding Box cho YOLO
+        // Vẽ Canvas Bounding Box cho YOLO khớp 100% với vùng hiển thị của ảnh (khử triệt để lỗi lệch viền letterbox)
         function drawYoloCanvas(objects, imgSize) {
             const canvas = document.getElementById('yoloCanvas');
             const img = document.getElementById('yoloImg');
-            if (!img || img.clientWidth === 0) return;
+            const box = document.getElementById('yoloBox');
+            if (!img || !box || img.clientWidth === 0 || img.clientHeight === 0) return;
 
-            canvas.width = img.clientWidth;
-            canvas.height = img.clientHeight;
+            const containerW = box.clientWidth;
+            const containerH = box.clientHeight;
+            if (containerW === 0 || containerH === 0) return;
+
+            canvas.width = containerW;
+            canvas.height = containerH;
             const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.clearRect(0, 0, containerW, containerH);
 
-            const srcW = (imgSize && imgSize.width) || 480;
-            const srcH = (imgSize && imgSize.height) || 640;
-            const scaleX = canvas.width / srcW;
-            const scaleY = canvas.height / srcH;
+            const srcW = (imgSize && imgSize.width) || img.naturalWidth || 480;
+            const srcH = (imgSize && imgSize.height) || img.naturalHeight || 640;
+
+            const imgRatio = srcW / srcH;
+            const containerRatio = containerW / containerH;
+
+            let renderW, renderH, offsetX, offsetY;
+            if (containerRatio > imgRatio) {
+                // Khung chứa rộng hơn ảnh: ảnh chạm trên-dưới, dải đen 2 bên
+                renderH = containerH;
+                renderW = containerH * imgRatio;
+                offsetX = (containerW - renderW) / 2;
+                offsetY = 0;
+            } else {
+                // Khung chứa cao hơn ảnh: ảnh chạm trái-phải, dải đen trên-dưới
+                renderW = containerW;
+                renderH = containerW / imgRatio;
+                offsetX = 0;
+                offsetY = (containerH - renderH) / 2;
+            }
+
+            const scale = renderW / srcW;
 
             // Vẽ vùng ROI hình thang nếu bật
             if (showRoi) {
-                const topY = canvas.height * 0.40;
-                const botY = canvas.height * 0.98;
-                const topW = canvas.width * 0.38;
-                const botW = canvas.width * 0.82;
-                const centerX = canvas.width / 2;
+                const topY = offsetY + renderH * 0.40;
+                const botY = offsetY + renderH * 0.98;
+                const topW = renderW * 0.38;
+                const botW = renderW * 0.82;
+                const centerX = offsetX + renderW / 2;
 
                 ctx.fillStyle = "rgba(0, 255, 136, 0.08)";
                 ctx.strokeStyle = "rgba(0, 255, 136, 0.6)";
@@ -972,15 +1008,14 @@
                 ctx.stroke();
             }
 
-            // Vẽ Bounding Boxes
+            // Vẽ Bounding Boxes ôm khít từng pixel
             objects.forEach(obj => {
                 const b = obj.bounding_box || {};
-                const x1 = b.x1 * scaleX;
-                const y1 = b.y1 * scaleY;
-                const x2 = b.x2 * scaleX;
-                const y2 = b.y2 * scaleY;
-                const w = x2 - x1;
-                const h = y2 - y1;
+                if (b.x1 === undefined || b.y1 === undefined) return;
+                const x1 = offsetX + b.x1 * scale;
+                const y1 = offsetY + b.y1 * scale;
+                const w = (b.x2 - b.x1) * scale;
+                const h = (b.y2 - b.y1) * scale;
 
                 const isDanger = obj.is_danger || obj.in_roi;
                 const color = isDanger ? "#ff2a55" : "#00f0ff";
@@ -997,10 +1032,10 @@
                 ctx.font = "bold 12px 'Outfit'";
                 const textW = ctx.measureText(label).width;
                 ctx.fillStyle = isDanger ? "rgba(255, 42, 85, 0.85)" : "rgba(0, 240, 255, 0.85)";
-                ctx.fillRect(x1, Math.max(0, y1 - 20), textW + 12, 20);
+                ctx.fillRect(x1, Math.max(offsetY, y1 - 20), textW + 12, 20);
 
                 ctx.fillStyle = isDanger ? "#fff" : "#000";
-                ctx.fillText(label, x1 + 6, Math.max(14, y1 - 5));
+                ctx.fillText(label, x1 + 6, Math.max(offsetY + 14, y1 - 5));
             });
         }
 
@@ -1040,11 +1075,17 @@
         // ==========================================
         // 3. XỬ LÝ MODEL SAM (MÀN HÌNH 3)
         // ==========================================
-        async function triggerSamSegmentation(clickPoint = null) {
+        let isSamRunning = false;
+
+        async function triggerSamSegmentation(clickPoint = null, isAuto = false) {
             if (!latestFrameB64) {
-                alert("Chưa có khung hình từ điện thoại. Hãy mở app và quét camera trước!");
+                if (!isAuto) {
+                    alert("Chưa có khung hình từ điện thoại. Hãy mở app và quét camera trước!");
+                }
                 return;
             }
+            if (isSamRunning) return;
+            isSamRunning = true;
 
             const btn = document.getElementById('btnRunSam');
             btn.innerText = "⏳ Đang phân đoạn SAM...";
@@ -1052,7 +1093,8 @@
 
             try {
                 const payload = {
-                    image_b64: latestFrameB64
+                    image_b64: latestFrameB64,
+                    detections: latestDetections
                 };
                 if (clickPoint) {
                     payload.x = clickPoint.x;
@@ -1072,7 +1114,7 @@
                     samImg.style.display = "block";
                     document.getElementById('samPlaceholder').style.display = "none";
                     document.getElementById('samInfoText').innerText = `${data.count} mặt nạ • ${data.elapsed_ms}ms`;
-                } else if (data.error) {
+                } else if (data.error && !isAuto) {
                     alert(`Lỗi SAM: ${data.error}`);
                 }
             } catch (err) {
@@ -1080,6 +1122,7 @@
             } finally {
                 btn.innerText = "⚡ Phân Đoạn SAM Ngay";
                 btn.disabled = false;
+                isSamRunning = false;
             }
         }
 
@@ -1093,17 +1136,20 @@
             const xNorm = (clickX / rect.width) * 480;
             const yNorm = (clickY / rect.height) * 640;
 
-            triggerSamSegmentation({ x: Math.round(xNorm), y: Math.round(yNorm) });
+            triggerSamSegmentation({ x: Math.round(xNorm), y: Math.round(yNorm) }, false);
         }
 
         function toggleAutoSam(enable) {
+            if (autoSamInterval) {
+                clearInterval(autoSamInterval);
+                autoSamInterval = null;
+            }
             if (enable) {
                 autoSamInterval = setInterval(() => {
-                    if (latestFrameB64) triggerSamSegmentation();
+                    if (latestFrameB64 && !isSamRunning) {
+                        triggerSamSegmentation(null, true);
+                    }
                 }, 2500);
-            } else {
-                if (autoSamInterval) clearInterval(autoSamInterval);
-                autoSamInterval = null;
             }
         }
 
@@ -1169,9 +1215,13 @@
             }
         }
 
-        // Tự động kết nối WebSocket khi mở trang
+        // Tự động kết nối WebSocket & kích hoạt Auto-SAM khi mở trang
         window.onload = () => {
             connectWebSocket();
+            const autoSamChk = document.getElementById('chkAutoSam');
+            if (!autoSamChk || autoSamChk.checked) {
+                toggleAutoSam(true);
+            }
         };
     </script>
 </body>

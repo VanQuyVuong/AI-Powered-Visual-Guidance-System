@@ -10,7 +10,13 @@ import os
 # Thêm đường dẫn backend vào sys.path để import được module
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app.vision.decision_engine import determine_position, generate_guidance, is_in_roi, estimate_distance
+from app.vision.decision_engine import (
+    determine_position,
+    generate_guidance,
+    build_navigation_speech,
+    is_in_roi,
+    estimate_distance,
+)
 from app.schemas.vision import Detection, BoundingBox
 
 
@@ -245,5 +251,87 @@ class TestEstimateDistance:
 
 
 # ==========================================
+# TEST 5: Gom nhóm vật cản & Dẫn đường thông minh
+# ==========================================
+
+class TestClusteringAndNavigation:
+    """Test gom nhóm nhiều vật cản gần nhau và dẫn đường né vật cản."""
+
+    def test_multiple_bottles_grouped_into_nhieu_chai_nuoc(self):
+        """4 chai nước đặt gần nhau phía trước → gom gọn thành 1 cụm 'nhiều chai nước' (không đọc lặp từng chai)."""
+        bottles = [
+            Detection(class_name="bottle", confidence=0.82, position="center", distance_m=1.2,
+                      bounding_box=BoundingBox(x1=220, y1=180, x2=250, y2=280)),
+            Detection(class_name="bottle", confidence=0.79, position="center", distance_m=1.3,
+                      bounding_box=BoundingBox(x1=270, y1=185, x2=300, y2=285)),
+            Detection(class_name="bottle", confidence=0.75, position="center", distance_m=1.3,
+                      bounding_box=BoundingBox(x1=320, y1=180, x2=350, y2=280)),
+            Detection(class_name="bottle", confidence=0.71, position="right", distance_m=1.4,
+                      bounding_box=BoundingBox(x1=440, y1=190, x2=470, y2=290)),
+        ]
+        res = generate_guidance(bottles)
+        assert res is not None
+        assert "nhiều chai nước" in res["text"].lower()
+        assert res["text"].lower().count("chai nước") == 1
+
+    def test_bottles_on_table_grouped_into_nhieu_chai_nuoc_tren_ban(self):
+        """Nhiều chai nước trên bàn → báo 'Phía trước ... có nhiều chai nước trên bàn.'"""
+        dets = [
+            Detection(class_name="dining table", confidence=0.88, position="center", distance_m=1.3,
+                      bounding_box=BoundingBox(x1=150, y1=220, x2=520, y2=450)),
+            Detection(class_name="bottle", confidence=0.82, position="center", distance_m=1.2,
+                      bounding_box=BoundingBox(x1=220, y1=180, x2=250, y2=280)),
+            Detection(class_name="bottle", confidence=0.79, position="center", distance_m=1.3,
+                      bounding_box=BoundingBox(x1=270, y1=185, x2=300, y2=285)),
+        ]
+        res = generate_guidance(dets)
+        assert res is not None
+        assert "nhiều chai nước trên bàn" in res["text"].lower()
+
+    def test_mixed_objects_grouped_into_nhieu_vat_can(self):
+        """Nhiều đồ vật khác loại đứng gần nhau → gom thành 'nhiều vật cản'."""
+        dets = [
+            Detection(class_name="chair", confidence=0.82, position="center", distance_m=1.2,
+                      bounding_box=BoundingBox(x1=200, y1=180, x2=280, y2=380)),
+            Detection(class_name="backpack", confidence=0.79, position="center", distance_m=1.3,
+                      bounding_box=BoundingBox(x1=290, y1=220, x2=350, y2=380)),
+            Detection(class_name="suitcase", confidence=0.75, position="center", distance_m=1.4,
+                      bounding_box=BoundingBox(x1=360, y1=210, x2=430, y2=390)),
+        ]
+        res = generate_guidance(dets)
+        assert res is not None
+        assert "nhiều vật cản" in res["text"].lower()
+
+    def test_safe_ahead_reports_di_thang(self):
+        """Khi phía trước không có vật cản → báo 'Phía trước an toàn, đi thẳng.'"""
+        res = build_navigation_speech(None, [], {"best_direction": "center", "Corridors": {}}, 640)
+        assert "an toàn" in res["text"].lower()
+        assert "đi thẳng" in res["text"].lower()
+
+    def test_blocked_center_guides_to_clear_side(self):
+        """Khi phía trước có bàn/vật cản và bên trái trống → hướng dẫn rẽ trái."""
+        base = {"text": "Cảnh báo! Phía trước có bàn cách 1.2 mét.", "priority": "HIGH"}
+        objs = [
+            {"class_name": "dining table", "class_name_vn": "bàn", "position": "center",
+             "distance_m": 1.2, "bbox": [220, 200, 520, 440]}
+        ]
+        nav = {"best_direction": "left", "Corridors": {"left": 3.5, "center": 1.2, "right": 1.4}}
+        res = build_navigation_speech(base, objs, nav, 640)
+        assert "rẽ trái" in res["text"].lower()
+
+    def test_wall_blocking_all_lanes_tells_user_to_look_left_or_right(self):
+        """Khi bức tường chắn ngang toàn bộ phía trước → nhắc dừng lại, nhìn sang trái hoặc sang phải."""
+        base = {"text": "Cảnh báo! Phía trước có bức tường cách 1.1 mét.", "priority": "CRITICAL"}
+        objs = [
+            {"class_name": "wall", "class_name_vn": "bức tường", "position": "center",
+             "distance_m": 1.1, "bbox": [60, 40, 580, 420]}
+        ]
+        nav = {"best_direction": "stop", "Corridors": {"left": 1.1, "center": 1.1, "right": 1.1}}
+        res = build_navigation_speech(base, objs, nav, 640)
+        assert "nhìn sang trái hoặc sang phải" in res["text"].lower()
+
+
+# ==========================================
 # Chạy tests: pytest backend/tests/test_decision_engine.py -v
 # ==========================================
+

@@ -6,15 +6,23 @@ AI Visual Guidance System - Backend API Server (FastAPI)
 import os
 import io
 import sys
+import subprocess
 import base64
 import asyncio
 from typing import Optional
 
+# Tự động chuyển sang Python trong .venv nếu người dùng gõ `python main.py` từ Python hệ thống/Conda
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+_venv_python = os.path.join(_project_root, ".venv", "Scripts", "python.exe")
+if os.path.exists(_venv_python):
+    if os.path.normcase(os.path.abspath(sys.executable)) != os.path.normcase(os.path.abspath(_venv_python)):
+        sys.exit(subprocess.call([_venv_python, "-u"] + sys.argv))
+
 # Thiết lập UTF-8 cho console Windows
 if hasattr(sys.stdout, 'buffer'):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True, write_through=True)
 if hasattr(sys.stderr, 'buffer'):
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True, write_through=True)
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -63,7 +71,7 @@ async def serve_web_demo():
     """Phục vụ giao diện Trung tâm giám sát 4 Model AI & Video từ điện thoại."""
     phone_stream_file = os.path.join(os.path.dirname(__file__), "view_phone_stream.html")
     if os.path.exists(phone_stream_file):
-        return FileResponse(phone_stream_file)
+        return FileResponse(phone_stream_file, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
     static_file = os.path.join(os.path.dirname(__file__), "static", "index.html")
     if os.path.exists(static_file):
         return FileResponse(static_file)
@@ -77,6 +85,15 @@ async def get_sample_3d_video():
     if os.path.exists(video_path):
         return FileResponse(video_path, media_type="video/mp4")
     raise HTTPException(status_code=404, detail="Video_test_3d.mp4 not found")
+
+
+@app.get("/download-apk")
+async def download_apk():
+    """Tải file APK Android mới nhất trực tiếp về điện thoại qua Wi-Fi mà không cần cắm cáp."""
+    apk_path = os.path.join(os.path.dirname(__file__), "..", "MBAPP", "app", "build", "outputs", "apk", "debug", "app-debug.apk")
+    if os.path.exists(apk_path):
+        return FileResponse(apk_path, media_type="application/vnd.android.package-archive", filename="app-debug.apk")
+    raise HTTPException(status_code=404, detail="Không tìm thấy file APK.")
 
 
 # ==========================================
@@ -94,7 +111,7 @@ async def analyze_image(image: UploadFile = File(...)):
 
     try:
         contents = await image.read()
-        result = await asyncio.to_thread(analyze_frame_sync, contents)
+        result = await asyncio.to_thread(analyze_frame_sync, contents, False)
         final_detections = [
             Detection(
                 class_name=obj["class_name"],
@@ -142,7 +159,7 @@ async def view_phone_stream_page():
     """Phục vụ giao diện xem video stream trực tiếp từ điện thoại."""
     html_path = os.path.join(os.path.dirname(__file__), "view_phone_stream.html")
     if os.path.exists(html_path):
-        return FileResponse(html_path, media_type="text/html")
+        return FileResponse(html_path, media_type="text/html", headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
     raise HTTPException(status_code=404, detail="view_phone_stream.html not found")
 
 
@@ -237,7 +254,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if "," in data:
                     data = data.split(",", 1)[1]
                 image_bytes = base64.b64decode(data)
-                result = await asyncio.to_thread(analyze_frame_sync, image_bytes)
+                result = await asyncio.to_thread(analyze_frame_sync, image_bytes, True)
                 # Gửi cho chính client và broadcast cho các Web Viewer
                 await manager.broadcast(result)
             except WebSocketDisconnect:
@@ -338,5 +355,41 @@ async def inspect_room_api(
     return spatial_service.inspect_room(image_bytes=img_bytes, custom_prompt=prompt)
 
 
+def get_local_ip() -> str:
+    """Tự động phát hiện địa chỉ IP Wi-Fi nội bộ của laptop."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return '127.0.0.1'
+
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    import threading
+    import webbrowser
+    import time
+
+    local_ip = get_local_ip()
+
+    print("\n" + "=" * 70)
+    print("🚀 AI VISUAL GUIDANCE SYSTEM - ĐẦU NÃO XỬ LÝ ĐÃ SẴN SÀNG!")
+    print(f"🌐 Màn hình Web Monitor (Laptop):     http://localhost:8000/view-phone")
+    print(f"📱 ĐỊA CHỈ IP CHO ĐIỆN THOẠI KẾT NỐI: {local_ip}")
+    print(f"   (Nhập vào ô cài đặt trên App:      http://{local_ip}:8000)")
+    print(f"📥 Link tải APK mới nhất qua Wi-Fi:   http://{local_ip}:8000/download-apk")
+    print("=" * 70)
+    print("🌐 Đang tự động mở màn hình Web Monitor trên trình duyệt...\n")
+
+    def _open_browser():
+        time.sleep(1.8)
+        try:
+            webbrowser.open("http://localhost:8000/view-phone")
+        except Exception:
+            pass
+
+    threading.Thread(target=_open_browser, daemon=True).start()
+    uvicorn.run(app, host="0.0.0.0", port=8000)
