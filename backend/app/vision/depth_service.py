@@ -30,6 +30,7 @@ SEG_OBSTACLE_MAP = {
     "wardrobe": ("cabinet", "tủ quần áo"),
     "bookcase": ("cabinet", "tủ sách"),
     "chest of drawers": ("cabinet", "tủ ngăn kéo"),
+    "shelf": ("cabinet", "kệ tủ"),
     "refrigerator": ("refrigerator", "tủ lạnh"),
     "table": ("table", "bàn"),
     "desk": ("table", "bàn"),
@@ -398,8 +399,8 @@ class DepthService:
 
                 matched = None
                 for p in parts:
-                    # Chỉ dùng SegFormer cho cột nhà / cửa (không dùng cho wall vì background phòng luôn có tường)
-                    if p in ("column", "pillar", "door", "double door"):
+                    # Dùng SegFormer cho cột nhà / cửa / tủ kệ (YOLO COCO không có các lớp này)
+                    if p in ("column", "pillar", "door", "double door", "cabinet", "wardrobe", "bookcase", "chest of drawers", "shelf"):
                         matched = SEG_OBSTACLE_MAP[p]
                         break
                 if not matched:
@@ -420,7 +421,7 @@ class DepthService:
                 else:
                     dist_m = 1.8
 
-                if dist_m <= 2.5:
+                if dist_m <= 2.2:
                     cx = (bx1 + bx2) / 2.0
                     pos = "left" if cx < w / 3.0 else ("right" if cx > 2.0 * w / 3.0 else "center")
                     results.append({
@@ -431,7 +432,7 @@ class DepthService:
                         "distance_m": dist_m,
                         "bounding_box": {"x1": bx1, "y1": by1, "x2": bx2, "y2": by2},
                         "in_roi": True,
-                        "is_danger": dist_m <= 2.2,
+                        "is_danger": dist_m <= 2.0,
                         "is_unknown": True,
                     })
                     known_boxes.append({"x1": bx1, "y1": by1, "x2": bx2, "y2": by2})
@@ -441,14 +442,14 @@ class DepthService:
         try:
             from app.vision.geometric_hazard_detector import geometric_hazard_detector
 
-            # Kiểm tra xem phía trước đã có vật thể YOLO nào nằm chắn ở làn giữa / hành lang chưa
+            # Kiểm tra xem phía trước đã có vật thể YOLO/SegFormer nào nằm chắn ở làn giữa / hành lang chưa
             has_center_known_obstacle = any(
                 (k.get("x1", 0) < 0.65 * w and k.get("x2", 0) > 0.35 * w)
                 for k in known_boxes
             )
 
             # A. Kiểm tra Bức tường chắn trước mặt:
-            # Chỉ xét khi phía trước CHƯA có vật thể YOLO chắn ở giữa (tránh báo đè bức tường lên chiếc ghế/cái bàn/người)
+            # Chỉ xét khi phía trước CHƯA có vật thể chắn ở giữa (tránh báo đè bức tường lên chiếc ghế/cái bàn/người)
             if not wall_detected and not has_center_known_obstacle and len(known_boxes) < 2:
                 wall_hazard = geometric_hazard_detector.detect_wall(
                     dmap, known_boxes=known_boxes, frame_bgr=frame_bgr
@@ -458,9 +459,9 @@ class DepthService:
                     known_boxes.append(wall_hazard["bounding_box"])
                     wall_detected = True
 
-            # B. CHỈ tìm Bậc thềm / Cầu thang dưới chân NẾU phía trước KHÔNG PHẢI LÀ BỨC TƯỜNG!
-            # (Tránh lỗi quay vào bức tường mà báo cả tường lẫn cầu thang)
-            if not wall_detected and frame_bgr is not None and frame_bgr.size > 0 and len(known_boxes) < 2:
+            # B. CHỈ tìm Bậc thềm / Cầu thang dưới chân NẾU phía trước KHÔNG PHẢI LÀ BỨC TƯỜNG và KHÔNG CÓ TỦ/GHẾ CHẮN GIỮA!
+            # (Tránh lỗi quay vào bức tường hoặc chiếc tủ có kệ ngang mà báo cầu thang)
+            if not wall_detected and not has_center_known_obstacle and frame_bgr is not None and frame_bgr.size > 0 and len(known_boxes) < 2:
                 stairs_hazard = geometric_hazard_detector.detect_stairs_and_curbs(
                     frame_bgr, dmap, known_boxes=known_boxes
                 )

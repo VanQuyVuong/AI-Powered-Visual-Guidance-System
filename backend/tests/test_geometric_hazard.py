@@ -250,3 +250,43 @@ def test_chair_in_front_warns_turn_immediately():
     assert speak_r is True
     assert "Phía trước có ghế, hãy rẽ sang phải." in text_r
 
+
+def test_ceramic_tile_floor_grout_lines_not_falsely_detected_as_stairs(detector):
+    """Nền gạch men phẳng có các đường ron ngang/dọc và độ sâu giảm mượt theo mặt sàn tuyệt đối KHÔNG báo là cầu thang."""
+    import cv2
+    h, w = 480, 640
+    frame = np.full((h, w, 3), 210, dtype=np.uint8)
+
+    # Vẽ các đường ron gạch ngang và dọc của nền gạch men
+    for y in [int(h * 0.48), int(h * 0.62), int(h * 0.76), int(h * 0.88)]:
+        cv2.line(frame, (int(w * 0.10), y), (int(w * 0.90), y), (60, 60, 60), 2)
+    for x in [int(w * 0.25), int(w * 0.50), int(w * 0.75)]:
+        cv2.line(frame, (x, int(h * 0.40)), (x, int(h * 0.95)), (60, 60, 60), 2)
+
+    # Độ sâu sàn phẳng dốc đều từ 3.2m (phía xa) về 0.8m (dưới chân), không có bước nhảy bậc đột ngột
+    dmap = np.linspace(3.2, 0.8, h, dtype=np.float32)[:, None] * np.ones((1, w), dtype=np.float32)
+
+    res = detector.detect_stairs_and_curbs(frame, dmap)
+    assert res is None, "Nền gạch men có rãnh không được phép nhận nhầm thành cầu thang/bậc thềm"
+
+
+def test_cabinet_with_bottom_shelves_not_falsely_detected_as_stairs(detector):
+    """Chiếc tủ có các thanh kệ ngang ở dưới (mặt đứng đồng nhất ~1.4m) tuyệt đối KHÔNG báo là cầu thang."""
+    import cv2
+    h, w = 480, 640
+    frame = np.full((h, w, 3), 180, dtype=np.uint8)
+
+    # Vẽ khung tủ dọc và 3 thanh kệ ngang bên dưới
+    cv2.rectangle(frame, (int(w * 0.20), int(h * 0.20)), (int(w * 0.80), int(h * 0.92)), (40, 40, 40), 4)
+    for y in [int(h * 0.52), int(h * 0.68), int(h * 0.84)]:
+        cv2.line(frame, (int(w * 0.20), y), (int(w * 0.80), y), (30, 30, 30), 4)
+
+    # Độ sâu chiếc tủ là mặt phẳng đứng ~1.4m (chênh lệch nhẹ ở các hốc kệ)
+    dmap = np.full((h, w), 1.4, dtype=np.float32)
+    dmap[int(h * 0.52):int(h * 0.68), :] = 1.50
+    dmap[int(h * 0.68):int(h * 0.84), :] = 1.42
+
+    res = detector.detect_stairs_and_curbs(frame, dmap)
+    assert res is None, "Chiếc tủ có thanh kệ ở dưới không được nhận nhầm thành cầu thang"
+
+
