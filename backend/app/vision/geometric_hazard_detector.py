@@ -402,6 +402,106 @@ class GeometricHazardDetector:
             "warning": f"Chú ý dưới chân, cách {stair_dist} mét có {name_vn}."
         }
 
+    def detect_pillar(
+        self,
+        dmap: Optional[np.ndarray],
+        known_boxes: Optional[List[Dict[str, int]]] = None,
+        frame_bgr: Optional[np.ndarray] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Phát hiện CÂY CỘT / TRỤ ĐỨNG (Pillar / Column) ngay trước mặt (0.35m - 1.75m):
+        - Giải quyết triệt để lỗi: YOLO COCO không có lớp 'column'/'pillar' và SegFormer đôi khi
+          nhận nhầm cột bê tông sơn phẳng là 'wall' (nền tường), trong khi detect_wall lại bỏ qua
+          vì cây cột hẹp hơn bức tường (chỉ chiếm 12% - 62% chiều ngang khung hình, hai bên cột là khoảng trống xa).
+        - Nguyên lý hình học 3D:
+          Tìm dải dọc liên tục nằm chắn hành lang giữa có độ sâu đồng nhất theo phương đứng (|dZ/dy| < 0.025),
+          khoảng cách gần (<= 1.75m), và nhô ra gần hơn hẳn so với nền phía sau ở bên trái hoặc bên phải (>= 0.35m).
+        """
+        if dmap is None or dmap.size == 0:
+            return None
+
+        h, w = dmap.shape[:2]
+        if h < 32 or w < 32:
+            return None
+
+        known_boxes = known_boxes or []
+        ry1, ry2 = int(h * 0.15), int(h * 0.82)
+        roi = dmap[ry1:ry2, :]
+        if roi.size == 0:
+            return None
+
+        # Tính độ sâu trung vị và độ biến thiên dọc |dZ/dy| cho từng cột pixel x
+        col_med_z = np.median(roi, axis=0)
+        col_dz_dy = np.mean(np.abs(np.diff(roi, axis=0)), axis=0)
+
+        # Cột pixel thuộc vật cản đứng gần nếu z <= 1.75m và bề mặt thẳng đứng (col_dz_dy < 0.025)
+        is_vert_close = (col_med_z <= 1.75) & (col_dz_dy < 0.025)
+
+        # Tìm đoạn liên tục (contiguous run) dài nhất có giao cắt với hành lang giữa [0.32*w, 0.68*w]
+        best_run = None
+        best_len = 0
+        cur_start = None
+
+        for x in range(w):
+            if is_vert_close[x]:
+                if cur_start is None:
+                    cur_start = x
+            else:
+                if cur_start is not None:
+                    run_len = x - cur_start
+                    if run_len > best_len and cur_start < int(w * 0.68) and x > int(w * 0.32):
+                        best_len = run_len
+                        best_run = (cur_start, x)
+                    cur_start = None
+        if cur_start is not None:
+            run_len = w - cur_start
+            if run_len > best_len and cur_start < int(w * 0.68) and w > int(w * 0.32):
+                best_len = run_len
+                best_run = (cur_start, w)
+
+        if best_run is None:
+            return None
+
+        bx1, bx2 = best_run
+        span_ratio = float(bx2 - bx1) / float(w)
+        # Cây cột có bề ngang từ 12% đến 64% khung hình (nếu > 64% thì detect_wall sẽ bắt là bức tường)
+        if span_ratio < 0.12 or span_ratio > 0.64:
+            return None
+
+        pillar_z = float(np.median(col_med_z[bx1:bx2]))
+        if pillar_z < 0.30 or pillar_z > 1.75:
+            return None
+
+        # Kiểm tra độ tương phản độ sâu với nền hai bên cột (ít nhất 1 bên phải sâu hơn cột >= 0.35m)
+        left_bg = col_med_z[:max(0, bx1 - 6)]
+        right_bg = col_med_z[min(w, bx2 + 6):]
+        left_diff = (float(np.median(left_bg)) - pillar_z) if left_bg.size >= 8 else 0.0
+        right_diff = (float(np.median(right_bg)) - pillar_z) if right_bg.size >= 8 else 0.0
+
+        if max(left_diff, right_diff) < 0.35:
+            return None
+
+        by1, by2 = ry1, ry2
+        if self._is_box_covered(bx1, by1, bx2, by2, known_boxes, thresh=0.30):
+            return None
+
+        cx = (bx1 + bx2) / 2.0
+        pos = "left" if cx < w / 3.0 else ("right" if cx > 2.0 * w / 3.0 else "center")
+        dist_m = round(pillar_z, 1)
+
+        return {
+            "class_name": "column",
+            "class_name_vn": "cột nhà",
+            "confidence": 0.90,
+            "position": pos,
+            "distance_m": dist_m,
+            "bounding_box": {"x1": int(bx1), "y1": int(by1), "x2": int(bx2), "y2": int(by2)},
+            "in_roi": True,
+            "is_danger": True,
+            "hazard_type": "VERTICAL_PILLAR",
+            "warning": f"Cảnh báo! Phía trước cách {dist_m} mét có cột nhà chắn lối."
+        }
+
     @staticmethod
     def _is_box_covered(bx1: int, by1: int, bx2: int, by2: int, known_boxes: List[Dict[str, int]], thresh: float = 0.35) -> bool:
         area = float(max(1, (bx2 - bx1) * (by2 - by1)))

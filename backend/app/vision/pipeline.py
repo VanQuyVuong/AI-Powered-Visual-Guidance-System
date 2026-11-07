@@ -163,13 +163,22 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
             "is_danger": is_danger
         })
 
-    # 4. LUÔN CHẠY PHÁT HIỆN BỨC TƯỜNG, BẬC THỀM, CẦU THANG & VẬT CẢN LẠ (KẾT HỢP DEPTH + GEOMETRIC + EDGESAM)
+    # 4. LUÔN CHẠY PHÁT HIỆN CỘT NHÀ, BỨC TƯỜNG, BẬC THỀM, CẦU THANG & VẬT CẢN LẠ (KẾT HỢP DEPTH + GEOMETRIC + EDGESAM)
+    # Chỉ truyền các hộp bao của vật thể GẦN (<= 2.25m) vào known_boxes để bàn ghế ở xa (4m - 5.5m) trong lớp học
+    # KHÔNG BAO GIỜ vô hiệu hóa việc phát hiện cây cột 1.2m hoặc bức tường ngay trước mặt!
     if frame_bgr is not None:
-        known_boxes = [d["bounding_box"] for d in raw_detections]
-        unknown_obstacles = depth_service.detect_unknown_obstacles(frame_bgr, known_boxes, dmap)
-        # Bổ sung vật cản lớn từ mặt nạ EdgeSAM nếu YOLO & bộ dò hình học chưa bắt được
-        if not unknown_obstacles and not all_objects:
-            unknown_obstacles = sam_service.get_unlabeled_mask_obstacles(all_objects, dmap, img_width, img_height)
+        near_known_boxes = [
+            o["bounding_box"] for o in all_objects if (o.get("distance_m") or 9.9) <= 2.25
+        ]
+        unknown_obstacles = depth_service.detect_unknown_obstacles(frame_bgr, near_known_boxes, dmap)
+        # Bổ sung vật cản lớn từ mặt nạ EdgeSAM nếu ở làn giữa chưa có vật cản gần nào được bắt
+        has_near_center_obj = any(
+            o.get("position") == "center" and (o.get("distance_m") or 9.9) <= 2.25
+            for o in all_objects
+        )
+        if not unknown_obstacles and not has_near_center_obj:
+            near_objs_only = [o for o in all_objects if (o.get("distance_m") or 9.9) <= 2.25]
+            unknown_obstacles = sam_service.get_unlabeled_mask_obstacles(near_objs_only, dmap, img_width, img_height)
         for unk in unknown_obstacles:
             all_objects.append(unk)
             if unk.get("is_danger", True):

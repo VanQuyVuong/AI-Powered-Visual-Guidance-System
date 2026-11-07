@@ -315,4 +315,35 @@ def test_far_chair_5_5m_never_triggers_turn_warning():
     assert prio == "LOW"
 
 
+def test_detect_pillar_at_1_2m_in_front_even_with_far_chairs(detector):
+    """Cây cột ngay trước mặt cách 1.2m BẮT BUỘC được phát hiện là 'cột nhà' và cảnh báo rẽ, kể cả khi ở xa 5m có ghế."""
+    from app.vision.guided_scan import reset_voice_state, update_spatial_scan_and_voice
+
+    h, w = 480, 640
+    # Nền phòng học phía sau xa 4.2m, riêng cây cột đứng ở giữa (x: 200 -> 390) cách 1.2m
+    dmap = np.full((h, w), 4.2, dtype=np.float32)
+    dmap[:, 200:390] = 1.2
+
+    pillar = detector.detect_pillar(dmap, known_boxes=[])
+    assert pillar is not None
+    assert pillar["class_name"] == "column"
+    assert pillar["class_name_vn"] == "cột nhà"
+    assert pillar["distance_m"] == 1.2
+    assert pillar["is_danger"] is True
+
+    # Kết hợp cây cột 1.2m với 2 chiếc ghế ở xa 5.2m ở hậu cảnh -> Vẫn phải cảnh báo né cây cột ngay lập tức!
+    far_chairs = [
+        {"class_name": "chair", "class_name_vn": "ghế", "position": "left", "distance_m": 5.2, "bounding_box": {"x1": 30, "y1": 200, "x2": 100, "y2": 280}},
+        {"class_name": "chair", "class_name_vn": "ghế", "position": "right", "distance_m": 5.5, "bounding_box": {"x1": 500, "y1": 200, "x2": 580, "y2": 280}},
+        pillar,
+    ]
+    reset_voice_state()
+    text, prio, speak = update_spatial_scan_and_voice("Phía trước có cột nhà.", "HIGH", far_chairs, None, 640, 200.0)
+    assert speak is True
+    assert "Phía trước có cột nhà" in text
+    assert "rẽ sang phải" in text or "rẽ sang trái" in text
+    assert prio == "HIGH"
+
+
+
 

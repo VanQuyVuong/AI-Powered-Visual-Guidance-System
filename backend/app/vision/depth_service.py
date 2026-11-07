@@ -437,59 +437,79 @@ class DepthService:
                     })
                     known_boxes.append({"x1": bx1, "y1": by1, "x2": bx2, "y2": by2})
 
-        # 2. PHÁT HIỆN HÌNH HỌC & QUANG HỌC: BỨC TƯỜNG (WALL) HOẶC BẬC THỀM / CẦU THANG (LOẠI TRỪ LẪN NHAU!)
-        wall_detected = wall_found_by_seg
+        # 2. PHÁT HIỆN HÌNH HỌC & QUANG HỌC: CỘT NHÀ (PILLAR), BỨC TƯỜNG (WALL) HOẶC BẬC THỀM / CẦU THANG
+        wall_or_pillar_detected = wall_found_by_seg
         try:
             from app.vision.geometric_hazard_detector import geometric_hazard_detector
 
-            # Kiểm tra xem phía trước đã có vật thể YOLO/SegFormer nào nằm chắn ở làn giữa / hành lang chưa
+            # Kiểm tra xem phía trước đã có vật thể YOLO/SegFormer GẦN nào nằm chắn ở làn giữa / hành lang chưa
             has_center_known_obstacle = any(
                 (k.get("x1", 0) < 0.65 * w and k.get("x2", 0) > 0.35 * w)
                 for k in known_boxes
             )
 
-            # A. Kiểm tra Bức tường chắn trước mặt:
-            # Chỉ xét khi phía trước CHƯA có vật thể chắn ở giữa (tránh báo đè bức tường lên chiếc ghế/cái bàn/người)
-            if not wall_detected and not has_center_known_obstacle and len(known_boxes) < 2:
+            # A1. Kiểm tra Cây cột / Trụ đứng (Pillar / Column) chắn trước mặt (cách <= 1.75m):
+            if not wall_or_pillar_detected and not has_center_known_obstacle:
+                pillar_hazard = geometric_hazard_detector.detect_pillar(
+                    dmap, known_boxes=known_boxes, frame_bgr=frame_bgr
+                )
+                if pillar_hazard:
+                    results.append(pillar_hazard)
+                    known_boxes.append(pillar_hazard["bounding_box"])
+                    wall_or_pillar_detected = True
+                    has_center_known_obstacle = True
+
+            # A2. Kiểm tra Bức tường chắn trước mặt:
+            if not wall_or_pillar_detected and not has_center_known_obstacle:
                 wall_hazard = geometric_hazard_detector.detect_wall(
                     dmap, known_boxes=known_boxes, frame_bgr=frame_bgr
                 )
                 if wall_hazard:
                     results.append(wall_hazard)
                     known_boxes.append(wall_hazard["bounding_box"])
-                    wall_detected = True
+                    wall_or_pillar_detected = True
+                    has_center_known_obstacle = True
 
-            # B. CHỈ tìm Bậc thềm / Cầu thang dưới chân NẾU phía trước KHÔNG PHẢI LÀ BỨC TƯỜNG và KHÔNG CÓ TỦ/GHẾ CHẮN GIỮA!
-            # (Tránh lỗi quay vào bức tường hoặc chiếc tủ có kệ ngang mà báo cầu thang)
-            if not wall_detected and not has_center_known_obstacle and frame_bgr is not None and frame_bgr.size > 0 and len(known_boxes) < 2:
+            # B. CHỈ tìm Bậc thềm / Cầu thang dưới chân NẾU phía trước KHÔNG PHẢI LÀ CỘT/TƯỜNG và KHÔNG CÓ TỦ/GHẾ CHẮN GIỮA!
+            if (
+                os.getenv("ENABLE_GEOMETRIC_STAIRS", "1").lower() in ("1", "true", "yes")
+                and not wall_or_pillar_detected
+                and not has_center_known_obstacle
+                and frame_bgr is not None
+                and frame_bgr.size > 0
+            ):
                 stairs_hazard = geometric_hazard_detector.detect_stairs_and_curbs(
                     frame_bgr, dmap, known_boxes=known_boxes
                 )
                 if stairs_hazard:
                     results.append(stairs_hazard)
                     known_boxes.append(stairs_hazard["bounding_box"])
+                    has_center_known_obstacle = True
         except Exception:
             pass
 
         # 3. QUY TẮC ĐẢO NGƯỢC AN TOÀN P0 (SAFETY INVERSION RULE TỪ DEPTH MAP):
-        # Nếu làn giữa có diện tích lớn (< 1.25m) bị chắn mà chưa có vật cản nào được phát hiện
-        # -> BẮT BUỘC phát cảnh báo "bức tường / vật cản phía trước", tuyệt đối không báo An toàn!
-        if dmap is not None and dmap.size > 0 and len(known_boxes) == 0:
+        # Nếu làn giữa có diện tích lớn (< 1.28m) bị chắn (ví dụ cây cột 1.2m ngay trước mặt)
+        # mà chưa có vật cản nào ở làn giữa được phát hiện (kể cả khi hai bên hoặc ở xa có bàn ghế)
+        # -> BẮT BUỘC phát cảnh báo vật cản phía trước, tuyệt đối không bỏ sót!
+        if dmap is not None and dmap.size > 0 and not any(
+            (k.get("x1", 0) < 0.65 * w and k.get("x2", 0) > 0.35 * w) for k in known_boxes
+        ):
             dh, dw = dmap.shape[:2]
             cy1, cy2 = int(dh * 0.20), int(dh * 0.78)
             cx1, cx2 = int(dw * 0.33), int(dw * 0.67)
             center_lane = dmap[cy1:cy2, cx1:cx2]
             if center_lane.size > 0:
-                close_ratio = float(np.mean(center_lane < 1.25))
+                close_ratio = float(np.mean(center_lane < 1.28))
                 median_center_z = float(np.median(center_lane))
-                if close_ratio >= 0.38 or median_center_z <= 1.20:
+                if close_ratio >= 0.35 or median_center_z <= 1.25:
                     cls_en, cls_vn = self._classify_front_region(cx1, cy1, cx2, cy2)
                     results.append({
                         "class_name": cls_en,
                         "class_name_vn": cls_vn,
                         "confidence": 0.88,
                         "position": "center",
-                        "distance_m": round(max(0.4, min(median_center_z, 1.2)), 1),
+                        "distance_m": round(max(0.4, min(median_center_z, 1.25)), 1),
                         "bounding_box": {"x1": int(cx1 * w / dw), "y1": int(cy1 * h / dh), "x2": int(cx2 * w / dw), "y2": int(cy2 * h / dh)},
                         "in_roi": True,
                         "is_danger": True,
