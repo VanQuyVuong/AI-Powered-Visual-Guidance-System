@@ -345,5 +345,61 @@ def test_detect_pillar_at_1_2m_in_front_even_with_far_chairs(detector):
     assert prio == "HIGH"
 
 
+def test_multi_model_fusion_engine_deduplicates_and_synthesizes_guidance():
+    """MultiModelFusionEngine phải khử trùng lặp khi YOLO bắt được 'ghế' còn Geometric/EdgeSAM báo đè 'wall'/'obstacle' và đưa ra quyết định rẽ tức thì."""
+    from app.vision.fusion_engine import MultiModelFusionEngine
+
+    engine = MultiModelFusionEngine()
+    yolo_objs = [{
+        "class_name": "chair",
+        "class_name_vn": "ghế",
+        "confidence": 0.85,
+        "position": "center",
+        "distance_m": 1.4,
+        "in_roi": True,
+        "is_danger": True,
+        "bounding_box": {"x1": 210, "y1": 140, "x2": 430, "y2": 440},
+    }]
+    structural_hazards = [{
+        "class_name": "wall",
+        "class_name_vn": "bức tường",
+        "confidence": 0.80,
+        "position": "center",
+        "distance_m": 1.5,
+        "in_roi": True,
+        "is_danger": True,
+        "bounding_box": {"x1": 100, "y1": 80, "x2": 540, "y2": 450},
+    }]
+    sam_obstacles = [{
+        "class_name": "obstacle",
+        "class_name_vn": "vật cản",
+        "confidence": 0.78,
+        "position": "center",
+        "distance_m": 1.4,
+        "in_roi": True,
+        "is_danger": True,
+        "bounding_box": {"x1": 215, "y1": 145, "x2": 425, "y2": 435},
+    }]
+    depth_lanes = {
+        "has_depth": True,
+        "lanes": {
+            "left": {"median_m": 3.5, "is_blocked": False},
+            "center": {"median_m": 1.4, "is_blocked": True},
+            "right": {"median_m": 2.8, "is_blocked": False},
+        },
+    }
+
+    res = engine.fuse_detections(yolo_objs, structural_hazards, sam_obstacles, depth_lanes, 640, 480, now=300.0)
+    fused = res["fused_objects"]
+    summary = res["fusion_summary"]
+
+    # Nhãn 'wall' và 'obstacle' trùng vùng với 'chair' phải bị loại bỏ, chỉ giữ lại 'chair'
+    assert len(fused) == 1
+    assert fused[0]["class_name"] == "chair"
+    assert summary["instant_action"] == "TURN_LEFT"
+    assert summary["lane_clearance"]["center"]["primary_hazard"] == "ghế"
+
+
+
 
 
