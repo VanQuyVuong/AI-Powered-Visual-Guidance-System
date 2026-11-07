@@ -107,19 +107,29 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         pos = determine_position(box["x1"], box["x2"], img_width)
         is_person = (cname == "person")
 
-        # 2. Ưu tiên lấy khoảng cách mét tinh chỉnh theo Pixel Mask của EdgeSAM + Depth Anything V2
+        # 2. Ưu tiên lấy khoảng cách mét tinh chỉnh theo Pixel Mask của EdgeSAM + Depth Anything V2,
+        # ĐỒNG THỜI đối chiếu chéo với khoảng cách hình học Pinhole để chống lỗi lệch frame (stale depth map)
+        # khi lia camera nhanh từ vật gần sang chiếc ghế ở xa (ví dụ ghế cách 5.5m nhưng depth map cũ còn lưu 1.3m).
+        pinhole_dist = estimate_distance_m(cname, box, img_width, img_height)
         sam_mask_dist = sam_service.get_mask_refined_depth(box, dmap)
         metric_dist = sam_mask_dist or depth_service.get_box_median_depth(box["x1"], box["y1"], box["x2"], box["y2"], dmap)
-        if metric_dist is not None and 0.2 <= metric_dist <= 15.0:
-            dist_m = metric_dist
-        else:
-            dist_m = estimate_distance_m(cname, box, img_width, img_height)
-
         box_h_ratio = (box["y2"] - box["y1"]) / float(max(1, img_height))
+
+        if metric_dist is not None and 0.2 <= metric_dist <= 15.0:
+            # Nếu hộp bao rất nhỏ (vật ở xa >= 3.0m theo kích thước quang học) nhưng depth map lại báo quá gần (< 62% pinhole_dist)
+            # do bản đồ độ sâu bất đồng bộ chưa kịp cập nhật khi xoay camera -> ưu tiên khoảng cách quang học thực tế!
+            if pinhole_dist >= 3.0 and box_h_ratio < 0.22 and metric_dist < pinhole_dist * 0.62:
+                dist_m = round(pinhole_dist, 1)
+            else:
+                dist_m = round(metric_dist, 1)
+        else:
+            dist_m = round(pinhole_dist, 1)
+
         overlaps_center = (box["x1"] < 0.65 * img_width and box["x2"] > 0.35 * img_width)
-        # 3. Tiêu chí nguy hiểm: Trong hành lang hoặc ở làn giữa (<= 3.0m), hoặc ở hai bên nhưng rất gần (<= 2.2m)
-        in_path = in_corridor or (pos == "center") or overlaps_center or (box_h_ratio >= 0.25)
-        is_danger = (in_path and dist_m <= 3.0) or (dist_m <= 2.2)
+        # 3. Tiêu chí nguy hiểm chuẩn trong nhà: Chỉ cảnh báo khi vật cản tiến vào phạm vi <= 2.25m ở làn giữa (hoặc <= 1.65m ở hai bên).
+        # Tuyệt đối không cảnh báo nguy hiểm đối với ghế/bàn ở xa 3m - 5.5m!
+        in_path = in_corridor or (pos == "center") or overlaps_center or (box_h_ratio >= 0.28 and dist_m <= 2.25)
+        is_danger = (in_path and dist_m <= 2.25) or (dist_m <= 1.65)
 
         # Chuẩn hóa confidence >= 0.40 cho các đồ vật nhỏ đã qua lọc
         effective_conf = max(conf, 0.42)
@@ -177,11 +187,11 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
                 roi_detections.append(unk_det)
 
     # 5. Chỉ đưa thêm các vật ở gần vào roi_detections nếu roi_detections đang trống
-    # (Tường chỉ đưa vào khi <= 1.35m, các vật cản khác <= 2.8m)
+    # (Tường chỉ đưa vào khi <= 1.35m, các vật cản khác <= 2.25m)
     if not roi_detections and all_objects:
         near_objs = [
             o for o in all_objects
-            if (o.get("distance_m") or 9.9) <= (1.35 if o.get("class_name") == "wall" else 2.8)
+            if (o.get("distance_m") or 9.9) <= (1.35 if o.get("class_name") == "wall" else 2.25)
         ]
         nearest = sorted(near_objs, key=lambda o: o.get("distance_m") or 9.9)[:4]
         for obj in nearest:

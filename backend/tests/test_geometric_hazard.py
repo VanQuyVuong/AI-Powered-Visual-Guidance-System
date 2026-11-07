@@ -290,3 +290,29 @@ def test_cabinet_with_bottom_shelves_not_falsely_detected_as_stairs(detector):
     assert res is None, "Chiếc tủ có thanh kệ ở dưới không được nhận nhầm thành cầu thang"
 
 
+def test_far_chair_5_5m_never_triggers_turn_warning():
+    """Chiếc ghế nằm ở xa 5.5m (hoặc > 2.25m) tuyệt đối KHÔNG được báo nguy hiểm rẽ phải/rẽ trái mà phải báo đi thẳng an toàn."""
+    from app.vision.guided_scan import reset_voice_state, update_spatial_scan_and_voice, assess_path
+
+    reset_voice_state()
+    far_chair = [{
+        "class_name": "chair",
+        "class_name_vn": "ghế",
+        "position": "center",
+        "distance_m": 5.5,
+        "in_roi": True,
+        "bounding_box": {"x1": 290, "y1": 180, "x2": 350, "y2": 240}
+    }]
+    res = assess_path("Phía trước cách 5.5 mét có ghế.", far_chair, None, 640)
+    assert res["status"] == "CLEAR"
+
+    t = 100.0
+    update_spatial_scan_and_voice("Phía trước cách 5.5 mét có ghế.", "LOW", far_chair, None, 640, t)
+    t += 0.2
+    text, prio, speak = update_spatial_scan_and_voice("Phía trước cách 5.5 mét có ghế.", "LOW", far_chair, None, 640, t)
+    assert speak is True
+    assert text == "Phía trước an toàn, đi thẳng."
+    assert prio == "LOW"
+
+
+
