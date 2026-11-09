@@ -151,8 +151,9 @@ class GeometricHazardDetector:
                             if std_g < 22.0 and edge_ratio < 0.045 and dh < 22.0 and ds < 50.0 and dv < 55.0:
                                 flat_blocks += 1
 
-                    # Nếu >= 11/16 ô trung tâm là cùng một mảng bề mặt phẳng đồng nhất -> Bức tường chắn trước mặt!
-                    if flat_blocks >= 11:
+                    # Nếu >= 11/16 ô trung tâm là cùng một mảng bề mặt phẳng đồng nhất VÀ đủ ánh sáng (med_v >= 30.0,
+                    # tránh trường hợp đi vào chỗ tối om hoặc bị che camera mà báo nhầm là bức tường)
+                    if flat_blocks >= 11 and med_v >= 30.0:
                         est_dist = 1.2
                         if dmap is not None and dmap.size > 0:
                             est_dist = round(min(3.5, max(0.5, float(np.median(dmap[cy1:cy2, cx1:cx2])))), 1)

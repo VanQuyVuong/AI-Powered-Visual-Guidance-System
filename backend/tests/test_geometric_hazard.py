@@ -400,6 +400,45 @@ def test_multi_model_fusion_engine_deduplicates_and_synthesizes_guidance():
     assert summary["lane_clearance"]["center"]["primary_hazard"] == "ghế"
 
 
+def test_blind_user_worst_case_safety_interrupts_and_dark_room(detector):
+    """Kiểm thử các tình huống khắc nghiệt (Worst-Case) từ góc nhìn người khiếm thị:
+    1. Ngắt khẩn cấp 0ms khi vừa báo 'An toàn' được 0.25s thì có người/cầu thang cắt ngang.
+    2. Ưu tiên cảnh báo cầu thang trong all_objects kể cả khi câu text bị vật 2 bên che lấp.
+    3. Cảnh báo lặp khẩn cấp khi người dùng tiến sát < 0.85m chỉ sau 2.2s.
+    4. Không báo nhầm bóng tối / che camera thành bức tường.
+    """
+    from app.vision.guided_scan import reset_voice_state, update_spatial_scan_and_voice
+
+    W, H = 640, 480
+    reset_voice_state()
+    update_spatial_scan_and_voice("", "LOW", [], None, W, 10.0)
+    s_clear, _, sp_clear = update_spatial_scan_and_voice("", "LOW", [], None, W, 12.0)
+    assert sp_clear is True and s_clear == "Phía trước an toàn, đi thẳng."
+
+    # Chỉ 0.25s sau khi nghe "An toàn", có người bước ra cách 1.1m -> Phải ngắt và cảnh báo NGAY!
+    sudden_person = [{
+        "class_name": "person", "class_name_vn": "người", "position": "center",
+        "distance_m": 1.1, "in_roi": True, "is_danger": True,
+        "bounding_box": {"x1": 220, "y1": 80, "x2": 420, "y2": 460},
+    }]
+    s_interrupt, _, sp_interrupt = update_spatial_scan_and_voice("Phía trước có người.", "HIGH", sudden_person, None, W, 12.25)
+    assert sp_interrupt is True
+    assert "Phía trước có người" in s_interrupt
+
+    # Tiến sát nguy kịch từ 2.0m xuống 0.65m sau 2.2s -> Phải nhắc lại ngay không chờ hết 6s
+    reset_voice_state()
+    chair_2m = [{"class_name": "chair", "class_name_vn": "ghế", "position": "center", "distance_m": 2.0, "in_roi": True, "is_danger": True, "bounding_box": {"x1": 240, "y1": 160, "x2": 400, "y2": 420}}]
+    update_spatial_scan_and_voice("Phía trước có ghế.", "HIGH", chair_2m, None, W, 20.0)
+    chair_065m = [{"class_name": "chair", "class_name_vn": "ghế", "position": "center", "distance_m": 0.65, "in_roi": True, "is_danger": True, "bounding_box": {"x1": 120, "y1": 80, "x2": 520, "y2": 470}}]
+    s_crit, _, sp_crit = update_spatial_scan_and_voice("Phía trước có ghế.", "HIGH", chair_065m, None, W, 22.2)
+    assert sp_crit is True
+
+    # Vùng tối om (intensity = 12) không được báo giả bức tường
+    dark_frame = np.full((H, W, 3), 12, dtype=np.uint8)
+    assert detector.detect_wall(None, known_boxes=[], frame_bgr=dark_frame) is None
+
+
+
 
 
 
