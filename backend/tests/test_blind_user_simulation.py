@@ -228,3 +228,14 @@ def test_scenario_15_pitch_black_dark_room_no_false_wall(sim_env):
     detector, _, W, H = sim_env
     dark_frame = np.full((H, W, 3), 12, dtype=np.uint8)
     assert detector.detect_wall(None, known_boxes=[], frame_bgr=dark_frame) is None
+
+
+def test_scenario_16_mobile_npu_export_plan():
+    """Kịch bản 16: Kiểm tra cấu hình lượng tử hóa INT8/FP16 phục vụ triển khai NPU trên điện thoại."""
+    from app.vision.npu_exporter import npu_exporter
+
+    plan = npu_exporter.get_npu_deployment_plan("qualcomm_qnn")
+    assert plan["compression_ratio"] >= 3.5
+    assert plan["total_int8_size_mb"] < plan["total_fp32_size_mb"]
+    assert len(plan["models"]) == 4
+
