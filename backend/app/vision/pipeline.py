@@ -25,6 +25,7 @@ from app.vision.tactile_paving_detector import detect_tactile_paving
 from app.vision.depth_service import depth_service
 from app.vision.distance_estimator import estimate_distance_m
 from app.vision.sam_service import sam_service
+from app.vision.fusion_engine import fusion_engine
 
 # Danh mục các vật cản & đồ vật thực tế trong nhà và ngoài đường
 OBSTACLE_CLASSES = {
@@ -107,19 +108,29 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         pos = determine_position(box["x1"], box["x2"], img_width)
         is_person = (cname == "person")
 
-        # 2. Ưu tiên lấy khoảng cách mét tinh chỉnh theo Pixel Mask của EdgeSAM + Depth Anything V2
+        # 2. Ưu tiên lấy khoảng cách mét tinh chỉnh theo Pixel Mask của EdgeSAM + Depth Anything V2,
+        # ĐỒNG THỜI đối chiếu chéo với khoảng cách hình học Pinhole để chống lỗi lệch frame (stale depth map)
+        # khi lia camera nhanh từ vật gần sang chiếc ghế ở xa (ví dụ ghế cách 5.5m nhưng depth map cũ còn lưu 1.3m).
+        pinhole_dist = estimate_distance_m(cname, box, img_width, img_height)
         sam_mask_dist = sam_service.get_mask_refined_depth(box, dmap)
         metric_dist = sam_mask_dist or depth_service.get_box_median_depth(box["x1"], box["y1"], box["x2"], box["y2"], dmap)
-        if metric_dist is not None and 0.2 <= metric_dist <= 15.0:
-            dist_m = metric_dist
-        else:
-            dist_m = estimate_distance_m(cname, box, img_width, img_height)
-
         box_h_ratio = (box["y2"] - box["y1"]) / float(max(1, img_height))
+
+        if metric_dist is not None and 0.2 <= metric_dist <= 15.0:
+            # Nếu hộp bao rất nhỏ (vật ở xa >= 3.0m theo kích thước quang học) nhưng depth map lại báo quá gần (< 62% pinhole_dist)
+            # do bản đồ độ sâu bất đồng bộ chưa kịp cập nhật khi xoay camera -> ưu tiên khoảng cách quang học thực tế!
+            if pinhole_dist >= 3.0 and box_h_ratio < 0.22 and metric_dist < pinhole_dist * 0.62:
+                dist_m = round(pinhole_dist, 1)
+            else:
+                dist_m = round(metric_dist, 1)
+        else:
+            dist_m = round(pinhole_dist, 1)
+
         overlaps_center = (box["x1"] < 0.65 * img_width and box["x2"] > 0.35 * img_width)
-        # 3. Tiêu chí nguy hiểm: Trong hành lang hoặc ở làn giữa (<= 3.0m), hoặc ở hai bên nhưng rất gần (<= 2.2m)
-        in_path = in_corridor or (pos == "center") or overlaps_center or (box_h_ratio >= 0.25)
-        is_danger = (in_path and dist_m <= 3.0) or (dist_m <= 2.2)
+        # 3. Tiêu chí nguy hiểm chuẩn trong nhà: Chỉ cảnh báo khi vật cản tiến vào phạm vi <= 2.25m ở làn giữa (hoặc <= 1.65m ở hai bên).
+        # Tuyệt đối không cảnh báo nguy hiểm đối với ghế/bàn ở xa 3m - 5.5m!
+        in_path = in_corridor or (pos == "center") or overlaps_center or (box_h_ratio >= 0.28 and dist_m <= 2.25)
+        is_danger = (in_path and dist_m <= 2.25) or (dist_m <= 1.65)
 
         # Chuẩn hóa confidence >= 0.40 cho các đồ vật nhỏ đã qua lọc
         effective_conf = max(conf, 0.42)
@@ -153,54 +164,65 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
             "is_danger": is_danger
         })
 
-    # 4. LUÔN CHẠY PHÁT HIỆN BỨC TƯỜNG, BẬC THỀM, CẦU THANG & VẬT CẢN LẠ (KẾT HỢP DEPTH + GEOMETRIC + EDGESAM)
+    # 4. CHẠY PHÁT HIỆN CỘT NHÀ, BỨC TƯỜNG, BẬC THỀM, CẦU THANG & VẬT CẢN LẠ (KẾT HỢP DEPTH + GEOMETRIC + EDGESAM)
+    # Chỉ truyền các hộp bao của vật thể GẦN (<= 2.25m) vào known_boxes để bàn ghế ở xa (4m - 5.5m) trong lớp học
+    # KHÔNG BAO GIỜ vô hiệu hóa việc phát hiện cây cột 1.2m hoặc bức tường ngay trước mặt!
+    structural_hazards = []
+    sam_obstacles = []
     if frame_bgr is not None:
-        known_boxes = [d["bounding_box"] for d in raw_detections]
-        unknown_obstacles = depth_service.detect_unknown_obstacles(frame_bgr, known_boxes, dmap)
-        # Bổ sung vật cản lớn từ mặt nạ EdgeSAM nếu YOLO & bộ dò hình học chưa bắt được
-        if not unknown_obstacles and not all_objects:
-            unknown_obstacles = sam_service.get_unlabeled_mask_obstacles(all_objects, dmap, img_width, img_height)
-        for unk in unknown_obstacles:
-            all_objects.append(unk)
-            if unk.get("is_danger", True):
-                has_obstacle_in_roi = True
-                unk_det = Detection(
-                    class_name=unk["class_name"],
-                    class_name_vn=unk.get("class_name_vn"),
-                    confidence=max(float(unk["confidence"]), 0.45),
-                    position=unk["position"],
-                    distance_m=unk.get("distance_m"),
-                    in_roi=True,
-                    is_danger=True,
-                    bounding_box=BoundingBox(**unk["bounding_box"])
-                )
-                roi_detections.append(unk_det)
-
-    # 5. Chỉ đưa thêm các vật ở gần vào roi_detections nếu roi_detections đang trống
-    # (Tường chỉ đưa vào khi <= 1.35m, các vật cản khác <= 2.8m)
-    if not roi_detections and all_objects:
-        near_objs = [
-            o for o in all_objects
-            if (o.get("distance_m") or 9.9) <= (1.35 if o.get("class_name") == "wall" else 2.8)
+        near_known_boxes = [
+            o["bounding_box"] for o in all_objects if (o.get("distance_m") or 9.9) <= 2.25
         ]
-        nearest = sorted(near_objs, key=lambda o: o.get("distance_m") or 9.9)[:4]
-        for obj in nearest:
-            obj["is_danger"] = True
+        structural_hazards = depth_service.detect_unknown_obstacles(frame_bgr, near_known_boxes, dmap)
+        # Bổ sung vật cản lớn từ mặt nạ EdgeSAM nếu ở làn giữa chưa có vật cản gần nào được bắt
+        has_near_center_obj = any(
+            o.get("position") == "center" and (o.get("distance_m") or 9.9) <= 2.25
+            for o in all_objects
+        )
+        if not structural_hazards and not has_near_center_obj:
+            near_objs_only = [o for o in all_objects if (o.get("distance_m") or 9.9) <= 2.25]
+            sam_obstacles = sam_service.get_unlabeled_mask_obstacles(near_objs_only, dmap, img_width, img_height)
+
+    # 5. BỘ TỔNG HỢP ĐA MÔ HÌNH (MULTI-MODEL FUSION ENGINE):
+    # Hợp nhất YOLO11 + Depth Anything V2 + EdgeSAM + SegFormer/Geometric 3D, khử trùng lặp IoU,
+    # làm mượt khoảng cách theo thời gian (EMA) và tính ma trận 3 làn tức thì.
+    now = time.time()
+    depth_lanes = depth_service.analyze_three_lanes_depth(dmap)
+    fusion_result = fusion_engine.fuse_detections(
+        yolo_objects=all_objects,
+        structural_hazards=structural_hazards,
+        sam_obstacles=sam_obstacles,
+        depth_lanes=depth_lanes,
+        img_width=img_width,
+        img_height=img_height,
+        now=now,
+    )
+    all_objects = fusion_result["fused_objects"]
+
+    # Xây dựng lại roi_detections từ danh sách vật cản đã được Fusion Engine chuẩn hóa
+    roi_detections = []
+    has_person_in_roi = False
+    has_obstacle_in_roi = False
+    for obj in all_objects:
+        if obj.get("is_danger"):
+            if str(obj.get("class_name", "")).lower() == "person":
+                has_person_in_roi = True
+            else:
+                has_obstacle_in_roi = True
             roi_detections.append(
                 Detection(
                     class_name=obj["class_name"],
                     class_name_vn=obj.get("class_name_vn"),
-                    confidence=max(float(obj["confidence"]), 0.42),
+                    confidence=max(float(obj.get("confidence", 0.5)), 0.42),
                     position=obj["position"],
                     distance_m=obj.get("distance_m"),
-                    in_roi=True,
+                    in_roi=bool(obj.get("in_roi", True)),
                     is_danger=True,
-                    bounding_box=BoundingBox(**obj["bounding_box"])
+                    bounding_box=BoundingBox(**obj["bounding_box"]),
                 )
             )
 
     # 5b. BỘ NHỚ CHỐNG RUNG TAY 2.0 GIÂY CHO VẬT CẢN Ở GIỮA:
-    now = time.time()
     center_objs_now = [o for o in all_objects if o.get("position") == "center"]
     _voice_state["history"] = [(t, cnt) for (t, cnt) in _voice_state["history"] if (now - t) <= 2.0]
     _voice_state["history"].append((now, len(center_objs_now)))
@@ -211,11 +233,11 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         # Giữ nguyên trạng thái nhiều vật cản ở giữa khi tay rung nhẹ làm rớt bớt box
         effective_objects_for_speech.append(all_objects[0])
 
-    # 6. Thuật toán điều hướng 3 làn (Navigation: straight/left/right/stop + Depth 3-Lane Free-Space)
+    # 6. Thuật toán điều hướng 3 làn (Navigation: straight/left/right/stop + Depth 3-Lane Free-Space + Fusion Summary)
     nav_data = generate_navigation_direction(roi_detections, img_width, img_height)
-    depth_lanes = depth_service.analyze_three_lanes_depth(dmap)
     if depth_lanes.get("has_depth"):
         nav_data["depth_lanes"] = depth_lanes["lanes"]
+    nav_data["fusion_summary"] = fusion_result["fusion_summary"]
 
     # 7. Sinh câu hướng dẫn gom nhóm + chỉ đường (Đi thẳng / Rẽ trái / Rẽ phải / Nhìn trái phải)
     base_guidance = generate_guidance(roi_detections)

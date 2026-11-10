@@ -250,3 +250,195 @@ def test_chair_in_front_warns_turn_immediately():
     assert speak_r is True
     assert "Phía trước có ghế, hãy rẽ sang phải." in text_r
 
+
+def test_ceramic_tile_floor_grout_lines_not_falsely_detected_as_stairs(detector):
+    """Nền gạch men phẳng có các đường ron ngang/dọc và độ sâu giảm mượt theo mặt sàn tuyệt đối KHÔNG báo là cầu thang."""
+    import cv2
+    h, w = 480, 640
+    frame = np.full((h, w, 3), 210, dtype=np.uint8)
+
+    # Vẽ các đường ron gạch ngang và dọc của nền gạch men
+    for y in [int(h * 0.48), int(h * 0.62), int(h * 0.76), int(h * 0.88)]:
+        cv2.line(frame, (int(w * 0.10), y), (int(w * 0.90), y), (60, 60, 60), 2)
+    for x in [int(w * 0.25), int(w * 0.50), int(w * 0.75)]:
+        cv2.line(frame, (x, int(h * 0.40)), (x, int(h * 0.95)), (60, 60, 60), 2)
+
+    # Độ sâu sàn phẳng dốc đều từ 3.2m (phía xa) về 0.8m (dưới chân), không có bước nhảy bậc đột ngột
+    dmap = np.linspace(3.2, 0.8, h, dtype=np.float32)[:, None] * np.ones((1, w), dtype=np.float32)
+
+    res = detector.detect_stairs_and_curbs(frame, dmap)
+    assert res is None, "Nền gạch men có rãnh không được phép nhận nhầm thành cầu thang/bậc thềm"
+
+
+def test_cabinet_with_bottom_shelves_not_falsely_detected_as_stairs(detector):
+    """Chiếc tủ có các thanh kệ ngang ở dưới (mặt đứng đồng nhất ~1.4m) tuyệt đối KHÔNG báo là cầu thang."""
+    import cv2
+    h, w = 480, 640
+    frame = np.full((h, w, 3), 180, dtype=np.uint8)
+
+    # Vẽ khung tủ dọc và 3 thanh kệ ngang bên dưới
+    cv2.rectangle(frame, (int(w * 0.20), int(h * 0.20)), (int(w * 0.80), int(h * 0.92)), (40, 40, 40), 4)
+    for y in [int(h * 0.52), int(h * 0.68), int(h * 0.84)]:
+        cv2.line(frame, (int(w * 0.20), y), (int(w * 0.80), y), (30, 30, 30), 4)
+
+    # Độ sâu chiếc tủ là mặt phẳng đứng ~1.4m (chênh lệch nhẹ ở các hốc kệ)
+    dmap = np.full((h, w), 1.4, dtype=np.float32)
+    dmap[int(h * 0.52):int(h * 0.68), :] = 1.50
+    dmap[int(h * 0.68):int(h * 0.84), :] = 1.42
+
+    res = detector.detect_stairs_and_curbs(frame, dmap)
+    assert res is None, "Chiếc tủ có thanh kệ ở dưới không được nhận nhầm thành cầu thang"
+
+
+def test_far_chair_5_5m_never_triggers_turn_warning():
+    """Chiếc ghế nằm ở xa 5.5m (hoặc > 2.25m) tuyệt đối KHÔNG được báo nguy hiểm rẽ phải/rẽ trái mà phải báo đi thẳng an toàn."""
+    from app.vision.guided_scan import reset_voice_state, update_spatial_scan_and_voice, assess_path
+
+    reset_voice_state()
+    far_chair = [{
+        "class_name": "chair",
+        "class_name_vn": "ghế",
+        "position": "center",
+        "distance_m": 5.5,
+        "in_roi": True,
+        "bounding_box": {"x1": 290, "y1": 180, "x2": 350, "y2": 240}
+    }]
+    res = assess_path("Phía trước cách 5.5 mét có ghế.", far_chair, None, 640)
+    assert res["status"] == "CLEAR"
+
+    t = 100.0
+    update_spatial_scan_and_voice("Phía trước cách 5.5 mét có ghế.", "LOW", far_chair, None, 640, t)
+    t += 0.2
+    text, prio, speak = update_spatial_scan_and_voice("Phía trước cách 5.5 mét có ghế.", "LOW", far_chair, None, 640, t)
+    assert speak is True
+    assert text == "Phía trước an toàn, đi thẳng."
+    assert prio == "LOW"
+
+
+def test_detect_pillar_at_1_2m_in_front_even_with_far_chairs(detector):
+    """Cây cột ngay trước mặt cách 1.2m BẮT BUỘC được phát hiện là 'cột nhà' và cảnh báo rẽ, kể cả khi ở xa 5m có ghế."""
+    from app.vision.guided_scan import reset_voice_state, update_spatial_scan_and_voice
+
+    h, w = 480, 640
+    # Nền phòng học phía sau xa 4.2m, riêng cây cột đứng ở giữa (x: 200 -> 390) cách 1.2m
+    dmap = np.full((h, w), 4.2, dtype=np.float32)
+    dmap[:, 200:390] = 1.2
+
+    pillar = detector.detect_pillar(dmap, known_boxes=[])
+    assert pillar is not None
+    assert pillar["class_name"] == "column"
+    assert pillar["class_name_vn"] == "cột nhà"
+    assert pillar["distance_m"] == 1.2
+    assert pillar["is_danger"] is True
+
+    # Kết hợp cây cột 1.2m với 2 chiếc ghế ở xa 5.2m ở hậu cảnh -> Vẫn phải cảnh báo né cây cột ngay lập tức!
+    far_chairs = [
+        {"class_name": "chair", "class_name_vn": "ghế", "position": "left", "distance_m": 5.2, "bounding_box": {"x1": 30, "y1": 200, "x2": 100, "y2": 280}},
+        {"class_name": "chair", "class_name_vn": "ghế", "position": "right", "distance_m": 5.5, "bounding_box": {"x1": 500, "y1": 200, "x2": 580, "y2": 280}},
+        pillar,
+    ]
+    reset_voice_state()
+    text, prio, speak = update_spatial_scan_and_voice("Phía trước có cột nhà.", "HIGH", far_chairs, None, 640, 200.0)
+    assert speak is True
+    assert "Phía trước có cột nhà" in text
+    assert "rẽ sang phải" in text or "rẽ sang trái" in text
+    assert prio == "HIGH"
+
+
+def test_multi_model_fusion_engine_deduplicates_and_synthesizes_guidance():
+    """MultiModelFusionEngine phải khử trùng lặp khi YOLO bắt được 'ghế' còn Geometric/EdgeSAM báo đè 'wall'/'obstacle' và đưa ra quyết định rẽ tức thì."""
+    from app.vision.fusion_engine import MultiModelFusionEngine
+
+    engine = MultiModelFusionEngine()
+    yolo_objs = [{
+        "class_name": "chair",
+        "class_name_vn": "ghế",
+        "confidence": 0.85,
+        "position": "center",
+        "distance_m": 1.4,
+        "in_roi": True,
+        "is_danger": True,
+        "bounding_box": {"x1": 210, "y1": 140, "x2": 430, "y2": 440},
+    }]
+    structural_hazards = [{
+        "class_name": "wall",
+        "class_name_vn": "bức tường",
+        "confidence": 0.80,
+        "position": "center",
+        "distance_m": 1.5,
+        "in_roi": True,
+        "is_danger": True,
+        "bounding_box": {"x1": 100, "y1": 80, "x2": 540, "y2": 450},
+    }]
+    sam_obstacles = [{
+        "class_name": "obstacle",
+        "class_name_vn": "vật cản",
+        "confidence": 0.78,
+        "position": "center",
+        "distance_m": 1.4,
+        "in_roi": True,
+        "is_danger": True,
+        "bounding_box": {"x1": 215, "y1": 145, "x2": 425, "y2": 435},
+    }]
+    depth_lanes = {
+        "has_depth": True,
+        "lanes": {
+            "left": {"median_m": 3.5, "is_blocked": False},
+            "center": {"median_m": 1.4, "is_blocked": True},
+            "right": {"median_m": 2.8, "is_blocked": False},
+        },
+    }
+
+    res = engine.fuse_detections(yolo_objs, structural_hazards, sam_obstacles, depth_lanes, 640, 480, now=300.0)
+    fused = res["fused_objects"]
+    summary = res["fusion_summary"]
+
+    # Nhãn 'wall' và 'obstacle' trùng vùng với 'chair' phải bị loại bỏ, chỉ giữ lại 'chair'
+    assert len(fused) == 1
+    assert fused[0]["class_name"] == "chair"
+    assert summary["instant_action"] == "TURN_LEFT"
+    assert summary["lane_clearance"]["center"]["primary_hazard"] == "ghế"
+
+
+def test_blind_user_worst_case_safety_interrupts_and_dark_room(detector):
+    """Kiểm thử các tình huống khắc nghiệt (Worst-Case) từ góc nhìn người khiếm thị:
+    1. Ngắt khẩn cấp 0ms khi vừa báo 'An toàn' được 0.25s thì có người/cầu thang cắt ngang.
+    2. Ưu tiên cảnh báo cầu thang trong all_objects kể cả khi câu text bị vật 2 bên che lấp.
+    3. Cảnh báo lặp khẩn cấp khi người dùng tiến sát < 0.85m chỉ sau 2.2s.
+    4. Không báo nhầm bóng tối / che camera thành bức tường.
+    """
+    from app.vision.guided_scan import reset_voice_state, update_spatial_scan_and_voice
+
+    W, H = 640, 480
+    reset_voice_state()
+    update_spatial_scan_and_voice("", "LOW", [], None, W, 10.0)
+    s_clear, _, sp_clear = update_spatial_scan_and_voice("", "LOW", [], None, W, 12.0)
+    assert sp_clear is True and s_clear == "Phía trước an toàn, đi thẳng."
+
+    # Chỉ 0.25s sau khi nghe "An toàn", có người bước ra cách 1.1m -> Phải ngắt và cảnh báo NGAY!
+    sudden_person = [{
+        "class_name": "person", "class_name_vn": "người", "position": "center",
+        "distance_m": 1.1, "in_roi": True, "is_danger": True,
+        "bounding_box": {"x1": 220, "y1": 80, "x2": 420, "y2": 460},
+    }]
+    s_interrupt, _, sp_interrupt = update_spatial_scan_and_voice("Phía trước có người.", "HIGH", sudden_person, None, W, 12.25)
+    assert sp_interrupt is True
+    assert "Phía trước có người" in s_interrupt
+
+    # Tiến sát nguy kịch từ 2.0m xuống 0.65m sau 2.2s -> Phải nhắc lại ngay không chờ hết 6s
+    reset_voice_state()
+    chair_2m = [{"class_name": "chair", "class_name_vn": "ghế", "position": "center", "distance_m": 2.0, "in_roi": True, "is_danger": True, "bounding_box": {"x1": 240, "y1": 160, "x2": 400, "y2": 420}}]
+    update_spatial_scan_and_voice("Phía trước có ghế.", "HIGH", chair_2m, None, W, 20.0)
+    chair_065m = [{"class_name": "chair", "class_name_vn": "ghế", "position": "center", "distance_m": 0.65, "in_roi": True, "is_danger": True, "bounding_box": {"x1": 120, "y1": 80, "x2": 520, "y2": 470}}]
+    s_crit, _, sp_crit = update_spatial_scan_and_voice("Phía trước có ghế.", "HIGH", chair_065m, None, W, 22.2)
+    assert sp_crit is True
+
+    # Vùng tối om (intensity = 12) không được báo giả bức tường
+    dark_frame = np.full((H, W, 3), 12, dtype=np.uint8)
+    assert detector.detect_wall(None, known_boxes=[], frame_bgr=dark_frame) is None
+
+
+
+
+
+
