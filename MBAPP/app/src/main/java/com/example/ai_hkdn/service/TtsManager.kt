@@ -1,19 +1,25 @@
 package com.example.ai_hkdn.service
 
 import android.content.Context
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import java.util.Locale
 
 /**
- * Trình quản lý giọng nói tiếng Việt Native (TTS)
+ * Trình quản lý giọng nói tiếng Việt Native (TTS) kết hợp Phản hồi Xúc giác (Haptic Vibration)
  * - Tối ưu chống nói đè (anti-overlap)
- * - Ưu tiên cảnh báo nguy cấp (HIGH/DANGER)
+ * - Ưu tiên cảnh báo nguy cấp (HIGH/CRITICAL)
+ * - Rung theo mã nhịp giúp người khiếm thị nhận biết nguy hiểm ngay cả ở nơi ồn ào
  */
 class TtsManager(context: Context) : TextToSpeech.OnInitListener {
 
     private val tag = "TtsManager"
-    private var tts: TextToSpeech? = TextToSpeech(context.applicationContext, this)
+    private val appContext = context.applicationContext
+    private var tts: TextToSpeech? = TextToSpeech(appContext, this)
     private var isInitialized = false
 
     private var lastSpokenText: String = ""
@@ -36,6 +42,46 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
     }
 
     /**
+     * Phát phản hồi xúc giác (rung) tương ứng với mức độ nguy hiểm:
+     * - CRITICAL / Quay đầu: Rung 3 nhịp dồn dập (SOS)
+     * - Cầu thang / Bậc thềm / Ổ gà: Rung 2 nhịp mạnh
+     * - HIGH / Rẽ trái / Rẽ phải: Rung 1 nhịp dứt khoát
+     */
+    private fun triggerHapticAlert(text: String, priority: String) {
+        try {
+            val lower = text.lowercase()
+            if (lower.contains("an toàn")) return
+
+            val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = appContext.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vm?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                appContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+            if (vibrator == null || !vibrator.hasVibrator()) return
+
+            val pattern: LongArray = when {
+                priority.equals("CRITICAL", ignoreCase = true) || lower.contains("quay đầu") ->
+                    longArrayOf(0, 180, 80, 180, 80, 260)
+                lower.contains("cầu thang") || lower.contains("bậc") || lower.contains("ổ gà") ->
+                    longArrayOf(0, 220, 100, 220)
+                else ->
+                    longArrayOf(0, 140)
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(pattern, -1)
+            }
+        } catch (e: Exception) {
+            Log.w(tag, "Không thể kích hoạt rung: ${e.message}")
+        }
+    }
+
+    /**
      * Đọc câu cảnh báo/chỉ đường thông minh:
      * - Nếu là cảnh báo khẩn (force / HIGH): Ngắt câu cũ đọc ngay lập tức!
      * - Nếu là cảnh báo thường: Kiểm tra nếu câu giống hệt vừa đọc trong 2.5s thì bỏ qua để không lặp lại gây khó chịu.
@@ -46,7 +92,9 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
         val now = System.currentTimeMillis()
         val isSafeMessage = text.contains("an toàn", ignoreCase = true)
         val wasSafeMessage = lastSpokenText.contains("an toàn", ignoreCase = true)
-        val isDanger = priority.equals("DANGER", ignoreCase = true) || priority.equals("HIGH", ignoreCase = true) || !isSafeMessage
+        val isDanger = priority.equals("CRITICAL", ignoreCase = true) ||
+            priority.equals("DANGER", ignoreCase = true) ||
+            priority.equals("HIGH", ignoreCase = true) || !isSafeMessage
 
         // 1. Nếu là thông báo "Phía trước an toàn": chỉ nhắc lại tối đa mỗi 8 giây và không bao giờ ngắt lời cảnh báo vật cản
         if (!force && isSafeMessage) {
@@ -69,6 +117,10 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
 
         lastSpokenText = text
         lastSpokenTime = now
+
+        if (isDanger) {
+            triggerHapticAlert(text, priority)
+        }
 
         val queueMode = if (shouldFlushImmediately) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
         tts?.speak(text, queueMode, null, "UTTERANCE_$now")

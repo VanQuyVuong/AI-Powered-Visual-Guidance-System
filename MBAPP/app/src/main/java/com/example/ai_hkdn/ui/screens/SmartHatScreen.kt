@@ -115,11 +115,18 @@ fun SmartHatScreen() {
                 if (newStatus == ConnectionStatus.CONNECTED) {
                     guidanceText = "Đã kết nối AI Server! Đang phân tích camera..."
                     if (isTtsEnabled) ttsManager.speak("Đã kết nối hệ thống thị giác thông minh", force = true)
+                } else if (newStatus == ConnectionStatus.DISCONNECTED && isStreaming) {
+                    guidanceText = "⚠️ Mất kết nối máy chủ AI, hãy dừng lại!"
+                    guidancePriority = "CRITICAL"
+                    if (isTtsEnabled) ttsManager.speak("Chú ý, mất kết nối máy chủ, hãy dừng lại chờ tín hiệu.", priority = "CRITICAL", force = true)
                 }
             },
             onError = { errMsg ->
                 guidanceText = "⚠️ $errMsg"
                 guidancePriority = "HIGH"
+                if (isTtsEnabled && isStreaming) {
+                    ttsManager.speak("Chú ý, kết nối mạng không ổn định, hãy bước chậm.", priority = "HIGH")
+                }
             }
         )
     }
