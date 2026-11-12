@@ -36,7 +36,7 @@ OBSTACLE_CLASSES = {
     "dog", "cat", "car", "motorcycle", "bicycle", "bus", "truck",
     "door", "stairs", "stair", "step", "curb", "doorstep", "threshold",
     "stop sign", "traffic light", "fire hydrant",
-    "wall", "column", "pillar", "cabinet", "obstacle", "multi_obstacle", "pothole"
+    "wall", "column", "pillar", "cabinet", "obstacle", "multi_obstacle", "pothole", "dropoff"
 }
 
 # Các lớp đồ vật lớn

@@ -488,6 +488,26 @@ class DepthService:
                     wall_or_pillar_detected = True
                     has_center_known_obstacle = True
 
+            # A3. Kiểm tra Vật cản lạ chắn ngang phía trước (như tấm bạt căng ngang, rèm chắn, tấm bảng, thùng lớn <= 1.85m):
+            if not wall_or_pillar_detected and not has_center_known_obstacle:
+                generic_obs = geometric_hazard_detector.detect_generic_front_obstacle(
+                    dmap, known_boxes=known_boxes, frame_bgr=frame_bgr
+                )
+                if generic_obs:
+                    results.append(generic_obs)
+                    known_boxes.append(generic_obs["bounding_box"])
+                    has_center_known_obstacle = True
+
+            # A4. Kiểm tra Hố sâu / Sụt lún / Bậc hụt chân dưới đất (Ground Drop-off):
+            if not wall_or_pillar_detected and not has_center_known_obstacle:
+                dropoff_hazard = geometric_hazard_detector.detect_ground_dropoff(
+                    dmap, known_boxes=known_boxes
+                )
+                if dropoff_hazard:
+                    results.append(dropoff_hazard)
+                    known_boxes.append(dropoff_hazard["bounding_box"])
+                    has_center_known_obstacle = True
+
             # B. CHỈ tìm Bậc thềm / Cầu thang dưới chân NẾU phía trước KHÔNG PHẢI LÀ CỘT/TƯỜNG và KHÔNG CÓ TỦ/GHẾ CHẮN GIỮA!
             if (
                 os.getenv("ENABLE_GEOMETRIC_STAIRS", "1").lower() in ("1", "true", "yes")

@@ -503,6 +503,161 @@ class GeometricHazardDetector:
             "warning": f"Cảnh báo! Phía trước cách {dist_m} mét có cột nhà chắn lối."
         }
 
+    def detect_generic_front_obstacle(
+        self,
+        dmap: Optional[np.ndarray],
+        known_boxes: Optional[List[Dict[str, int]]] = None,
+        frame_bgr: Optional[np.ndarray] = None,
+        max_dist_m: float = 1.85,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Phát hiện VẬT CẢN LẠ CHẮN NGANG PHÍA TRƯỚC (như tấm bạt căng ngang, rèm che, tấm ván, thùng lớn)
+        trong phạm vi `<= 1.85m` khi YOLO không có nhãn từ vựng và `detect_wall` bỏ qua do bề mặt
+        bạt/vải có nếp gấp nhăn (`|dZ/dy|` lớn hơn tường phẳng hoặc có hoa văn/màu sắc không đồng nhất).
+        Quy chung về nhãn chuẩn `"obstacle"` (`"vật cản"`) để cảnh báo tức thì cho người khiếm thị.
+        """
+        if dmap is None or dmap.size == 0:
+            return None
+
+        h, w = dmap.shape[:2]
+        if h < 24 or w < 24:
+            return None
+
+        known_boxes = known_boxes or []
+        x1, x2 = int(w * 0.26), int(w * 0.74)
+        y1, y2 = int(h * 0.18), int(h * 0.78)
+        roi_depth = dmap[y1:y2, x1:x2]
+        if roi_depth.size == 0:
+            return None
+
+        rh, rw = roi_depth.shape[:2]
+        top_half = roi_depth[:max(1, rh // 2), :]
+        bot_half = roi_depth[max(1, rh // 2):, :]
+
+        top_med_z = float(np.median(top_half))
+        bot_med_z = float(np.median(bot_half))
+
+        # Nếu phần trên khung hình xa hơn phần dưới rất nhiều (top_med_z - bot_med_z > 1.20m)
+        # và phần trên thông thoáng (> 2.15m) -> Đây là mặt sàn mở bình thường, không phải tấm bạt/vật cản chắn ngang!
+        if (top_med_z - bot_med_z) > 1.20 and top_med_z > 2.15:
+            return None
+
+        # Tấm bạt căng ngang hoặc vật cản treo/đứng chắn lối đi sẽ làm cả nửa trên lẫn vùng giữa có độ sâu <= max_dist_m
+        close_mask = ((roi_depth >= 0.25) & (roi_depth <= max_dist_m)).astype(np.uint8)
+        close_ratio = float(np.mean(close_mask))
+        upper_close_ratio = float(np.mean((top_half >= 0.25) & (top_half <= max_dist_m + 0.10)))
+
+        if close_ratio < 0.32 or upper_close_ratio < 0.26:
+            return None
+
+        ys, xs = np.where(close_mask > 0)
+        if ys.size < 20:
+            return None
+
+        bx1 = x1 + int(np.percentile(xs, 5))
+        bx2 = x1 + int(np.percentile(xs, 95))
+        by1 = y1 + int(np.percentile(ys, 5))
+        by2 = y1 + int(np.percentile(ys, 95))
+
+        if (bx2 - bx1) < int(w * 0.16) or (by2 - by1) < int(h * 0.16):
+            return None
+
+        if self._is_box_covered(bx1, by1, bx2, by2, known_boxes, thresh=0.25):
+            return None
+
+        obs_z = float(np.median(roi_depth[close_mask > 0]))
+        dist_m = round(max(0.3, min(obs_z, max_dist_m)), 1)
+
+        return {
+            "class_name": "obstacle",
+            "class_name_vn": "vật cản",
+            "confidence": round(min(0.92, 0.68 + close_ratio * 0.25), 2),
+            "position": "center",
+            "distance_m": dist_m,
+            "bounding_box": {"x1": int(bx1), "y1": int(by1), "x2": int(bx2), "y2": int(by2)},
+            "in_roi": True,
+            "is_danger": True,
+            "hazard_type": "GENERIC_FRONT_OBSTACLE",
+            "warning": f"Cảnh báo! Phía trước cách {dist_m} mét có vật cản chắn lối."
+        }
+
+    def detect_ground_dropoff(
+        self,
+        dmap: Optional[np.ndarray],
+        known_boxes: Optional[List[Dict[str, int]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Phát hiện HỐ SÂU / SỤT LÚN / BẬC HỤT CHÂN (Ground Drop-off / Deep Pit) ngay dưới chân:
+        - Trên mặt phẳng đi bộ bình thường, khi quét từ giữa ảnh (y=50%) xuống sát chân (y=92%),
+          khoảng cách độ sâu Z giảm đều (gần người hơn).
+        - Nếu xuất hiện HỐ SÂU hoặc bậc hụt sâu dưới đất: tại ranh giới miệng hố, các hàng pixel
+          phía dưới (gần chân hơn trên ảnh) đột ngột vọt độ sâu Z TĂNG LÊN (sâu/xa hơn mép trên >= 0.52m),
+          hoặc tồn tại vùng lõm sâu bất thường (>= +0.65m so với mặt sàn hai bên).
+        """
+        if dmap is None or dmap.size == 0:
+            return None
+
+        h, w = dmap.shape[:2]
+        if h < 32 or w < 32:
+            return None
+
+        known_boxes = known_boxes or []
+        gx1, gx2 = int(w * 0.24), int(w * 0.76)
+        gy1, gy2 = int(h * 0.50), int(h * 0.92)
+        foot_roi = dmap[gy1:gy2, gx1:gx2]
+        if foot_roi.size == 0:
+            return None
+
+        rh, rw = foot_roi.shape[:2]
+        if rh < 16:
+            return None
+
+        # Mặt đất bình thường quanh mép trên vùng bước chân phải nằm trong tầm gần (0.5m - 2.3m)
+        upper_ground_z = float(np.median(foot_roi[:max(2, rh // 4), :]))
+        if upper_ground_z > 2.35 or upper_ground_z < 0.45:
+            return None
+
+        row_med_z = np.median(foot_roi, axis=1)
+        # Tìm bước nhảy độ sâu NGƯỢC CHIỀU (phía dưới ảnh lại sâu vọt hơn phía trên >= 0.52m)
+        max_drop_jump = 0.0
+        drop_row_idx = -1
+        for y_idx in range(4, rh - 4):
+            z_above = float(np.mean(row_med_z[max(0, y_idx - 4):y_idx]))
+            z_below = float(np.mean(row_med_z[y_idx + 1:min(rh, y_idx + 5)]))
+            drop_jump = z_below - z_above
+            if drop_jump > max_drop_jump and z_above <= 2.2:
+                max_drop_jump = drop_jump
+                drop_row_idx = y_idx
+
+        if max_drop_jump < 0.52 or drop_row_idx < 0:
+            return None
+
+        pit_mask = (foot_roi[drop_row_idx:, :] >= (upper_ground_z + 0.45)).astype(np.uint8)
+        pit_ratio = float(np.mean(pit_mask))
+        if pit_ratio < 0.25:
+            return None
+
+        bx1, bx2 = gx1 + int(rw * 0.10), gx1 + int(rw * 0.90)
+        by1 = gy1 + max(0, drop_row_idx - 4)
+        by2 = gy2
+
+        if self._is_box_covered(bx1, by1, bx2, by2, known_boxes, thresh=0.35):
+            return None
+
+        dist_m = round(max(0.5, min(upper_ground_z, 2.0)), 1)
+        return {
+            "class_name": "dropoff",
+            "class_name_vn": "hố sâu",
+            "confidence": round(min(0.94, 0.72 + min(0.20, max_drop_jump * 0.15)), 2),
+            "position": "center",
+            "distance_m": dist_m,
+            "bounding_box": {"x1": int(bx1), "y1": int(by1), "x2": int(bx2), "y2": int(by2)},
+            "in_roi": True,
+            "is_danger": True,
+            "hazard_type": "GROUND_DROPOFF",
+            "warning": f"Nguy hiểm! Chú ý dưới chân cách {dist_m} mét có hố sâu, hãy dừng lại."
+        }
+
     @staticmethod
     def _is_box_covered(bx1: int, by1: int, bx2: int, by2: int, known_boxes: List[Dict[str, int]], thresh: float = 0.35) -> bool:
         area = float(max(1, (bx2 - bx1) * (by2 - by1)))
