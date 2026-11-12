@@ -352,3 +352,93 @@ def test_scenario_20_alley_wall_drift_warning(sim_env):
     assert prio == "HIGH"
 
 
+def test_scenario_21_wall_at_1_4m_to_1_8m_allows_two_more_steps(sim_env):
+    """
+    Kịch bản 21: Bức tường cách 1.3m - 1.8m (ngoài đời vẫn đủ đi thêm 2 bước chân thoải mái):
+    - Không bị nhận nhầm là 'vật cản 1.8m'.
+    - Hệ thống báo 'Phía trước an toàn, đi thẳng' và chỉ báo quay đầu khi tiến sát <= 1.0m.
+    """
+    detector, fusion, W, H = sim_env
+    dmap_1_5m = np.full((H, W), 1.45, dtype=np.float32)
+
+    # Tường phẳng ở 1.45m không bao giờ bị bắt nhầm là 'vật cản' (generic front obstacle)
+    assert detector.detect_generic_front_obstacle(dmap_1_5m, known_boxes=[]) is None
+
+    wall_1_45m = [{
+        "class_name": "wall", "class_name_vn": "bức tường", "confidence": 0.88,
+        "position": "center", "distance_m": 1.45, "in_roi": True, "is_danger": True,
+        "bounding_box": {"x1": 60, "y1": 50, "x2": 580, "y2": 430},
+    }]
+    lanes_1_45m = {
+        "has_depth": True,
+        "lanes": {k: {"median_m": 1.45, "is_blocked": False} for k in ("left", "center", "right")},
+    }
+    f_res = fusion.fuse_detections([], wall_1_45m, [], lanes_1_45m, W, H, now=200.0)
+    # Fusion Engine chuẩn hóa wall ở 1.45m (> 1.0m) là chưa nguy hiểm
+    assert f_res["fused_objects"][0]["is_danger"] is False
+
+    update_spatial_scan_and_voice("Phía trước có bức tường.", "LOW", f_res["fused_objects"], lanes_1_45m, W, 200.0)
+    speech, prio, speak = update_spatial_scan_and_voice("Phía trước có bức tường.", "LOW", f_res["fused_objects"], lanes_1_45m, W, 202.0)
+    assert speak is True
+    assert speech == "Phía trước an toàn, đi thẳng."
+    assert prio == "LOW"
+
+
+def test_scenario_22_real_upward_stairs_with_landing_wall_ahead(sim_env):
+    """
+    Kịch bản 22: Đi LÊN cầu thang thực tế (mặt bậc tối màu xen kẽ cổ bậc sáng màu, khoảng cách xuyên tâm Z
+    chênh lệch ít do bậc nâng cao dần về phía ngực, phía trên có tường chiếu nghỉ 1.8m)
+    -> Bắt trúng 'cầu thang' và đọc 'Chú ý dưới chân, có cầu thang, hãy bước chậm', tuyệt đối không báo 'vật cản 1.8m'.
+    """
+    detector, fusion, W, H = sim_env
+    frame = np.full((H, W, 3), 185, dtype=np.uint8)
+    # Vẽ 4 bậc thang đi lên (mặt bậc tối màu 45, cổ bậc sáng màu 175)
+    for y_top, y_bot in [(210, 245), (275, 315), (345, 390), (420, 465)]:
+        frame[y_top:y_bot, 90:550] = (45, 50, 45)
+        cv2.line(frame, (90, y_top), (550, y_top), (20, 20, 20), 3)
+        cv2.line(frame, (90, y_bot), (550, y_bot), (210, 210, 200), 3)
+
+    # Độ sâu xuyên tâm khi đi lên cầu thang chỉ biến thiên nhẹ 1.65m -> 1.80m
+    dmap = np.linspace(1.65, 1.80, H, dtype=np.float32)[:, None] * np.ones((1, W), dtype=np.float32)
+
+    stairs = detector.detect_stairs_and_curbs(frame, dmap, known_boxes=[])
+    assert stairs is not None
+    assert stairs["class_name"] == "stairs"
+    assert stairs["class_name_vn"] == "cầu thang"
+    assert stairs["is_danger"] is True
+
+    f_res = fusion.fuse_detections([], [stairs], [], None, W, H, now=210.0)
+    speech, _, speak = update_spatial_scan_and_voice("", "HIGH", f_res["fused_objects"], None, W, 210.0)
+    assert speak is True
+    assert speech == "Chú ý dưới chân, có cầu thang, hãy bước chậm."
+
+
+def test_scenario_23_real_downward_granite_stairs_with_side_handrail(sim_env):
+    """
+    Kịch bản 23: Đứng đầu cầu thang đá hoa cương nhìn XUỐNG (Depth Anything V2 nội suy dốc mượt từ 4.5m về 2.8m,
+    bên trái có song sắt dọc của lan can tay vịn) -> Bắt trúng 'cầu thang' và báo bước chậm.
+    """
+    detector, fusion, W, H = sim_env
+    frame = np.full((H, W, 3), 115, dtype=np.uint8)
+    # Song sắt dọc của lan can bên trái (x < 110)
+    for x in range(25, 105, 20):
+        cv2.line(frame, (x, 150), (x, 460), (40, 40, 40), 4)
+    # 5 bậc thang đá hoa cương đi xuống có bóng đổ tăng dần
+    step_shades = [130, 110, 92, 74, 55]
+    step_ys = [210, 260, 315, 375, 435]
+    prev_y = 180
+    for y, shade in zip(step_ys, step_shades):
+        frame[prev_y:y, 105:540] = (shade, shade, shade)
+        cv2.line(frame, (105, y), (540, y), (25, 25, 25), 3)
+        prev_y = y
+
+    dmap = np.linspace(4.5, 2.8, H, dtype=np.float32)[:, None] * np.ones((1, W), dtype=np.float32)
+
+    stairs = detector.detect_stairs_and_curbs(frame, dmap, known_boxes=[])
+    assert stairs is not None
+    assert stairs["class_name"] == "stairs"
+    assert stairs["class_name_vn"] == "cầu thang"
+    assert stairs["is_danger"] is True
+
+
+
