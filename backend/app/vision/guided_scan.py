@@ -16,7 +16,7 @@ Quy tắc đơn giản, dứt khoát theo yêu cầu người dùng:
 from typing import Optional
 
 # Khoảng cách nguy hiểm (m)
-WALL_DANGER_M = 1.30        # Bức tường lại gần <= 1.3m mới bắt đầu cảnh báo rẽ/quay đầu (tránh báo từ xa 2m)
+WALL_DANGER_M = 1.00        # Bức tường chỉ báo rẽ/quay đầu khi tiến sát <= 1.0m (còn cách 1.1m - 1.8m tức 2 bước chân vẫn cho đi tiếp)
 OBSTACLE_DANGER_M = 2.25    # Vật cản ở hành lang an toàn / làn giữa <= 2.25m (chặn triệt để báo nhầm ghế ở xa 3m - 5.5m)
 SIDE_OBSTACLE_M = 1.65      # Vật cản ở 2 bên <= 1.65m
 
@@ -162,10 +162,10 @@ def assess_path(cur_text: str, all_objects: list, depth_lanes: Optional[dict], i
     # 3. VẬT CẢN TRUNG TÂM / VÙNG HÀNH LANG AN TOÀN (CENTER / PATH)
     center_objs = [o for o in objs if is_in_path(o)]
 
-    # Nếu chỉ có các vật thể ở rất xa (> 2.25m, ví dụ ghế cách 5.5m) và trung vị độ sâu làn giữa > 1.25m
+    # Nếu chỉ có các vật thể ở rất xa (> 2.25m, ví dụ ghế cách 5.5m) hoặc tường còn cách > 1.0m (đủ 2 bước chân)
     # thì không bao giờ coi là đường bị chắn
     has_only_far_center_objs = bool(objs) and not center_objs and all(dist(o) > OBSTACLE_DANGER_M for o in objs)
-    depth_strictly_blocked = c_blk and (c_med <= 1.25 if has_only_far_center_objs else c_med <= 1.40)
+    depth_strictly_blocked = c_blk and (c_med <= 0.95 if has_only_far_center_objs else c_med <= 1.00)
 
     center_blocked = is_wall_near or bool(center_objs) or depth_strictly_blocked
 

@@ -158,8 +158,8 @@ class MultiModelFusionEngine:
             c_box = cand.get("bounding_box", {})
             c_prio = SEMANTIC_PRIORITY.get(c_name, 60)
 
-            # Nếu đã có vật cản cụ thể (ghế, bàn, cột nhà, cầu thang) ở làn giữa thì loại bỏ nhãn "wall" chung chung đè lên
-            if c_name == "wall" and has_specific_center_hazard:
+            # Nếu đã có vật cản cụ thể (ghế, bàn, cột nhà, cầu thang) ở làn giữa thì loại bỏ nhãn "wall"/"obstacle" chung chung đè lên
+            if c_name in ("wall", "obstacle") and has_specific_center_hazard:
                 continue
 
             is_duplicate = False
@@ -191,11 +191,13 @@ class MultiModelFusionEngine:
             dist_val = float(cand.get("distance_m") if cand.get("distance_m") is not None else 9.9)
             pos_val = str(cand.get("position", "center"))
             if c_name == "wall":
-                cand["is_danger"] = dist_val <= 1.35
-            elif c_name in ("stairs", "step"):
+                cand["is_danger"] = dist_val <= 1.00
+            elif c_name in ("stairs", "step", "dropoff"):
                 cand["is_danger"] = dist_val <= 2.40
             elif c_name in ("column", "pillar"):
                 cand["is_danger"] = dist_val <= 1.85
+            elif c_name == "obstacle":
+                cand["is_danger"] = dist_val <= 1.50
             else:
                 in_path = bool(cand.get("in_roi")) or (pos_val == "center")
                 cand["is_danger"] = (in_path and dist_val <= 2.25) or (dist_val <= 1.65)
@@ -219,7 +221,7 @@ class MultiModelFusionEngine:
             nearest_obj = min(lane_objs, key=lambda x: float(x.get("distance_m") or 9.9)) if lane_objs else None
             nearest_dist = float(nearest_obj.get("distance_m")) if (nearest_obj and nearest_obj.get("distance_m") is not None) else med_m
             eff_clear_m = round(min(med_m, nearest_dist), 2)
-            is_blocked = bool(lane_objs) or bool(d_info.get("is_blocked", False) and med_m <= 1.30)
+            is_blocked = bool(lane_objs) or bool(d_info.get("is_blocked", False) and med_m <= 1.00)
 
             lane_clearance[lane_name] = {
                 "clear_distance_m": eff_clear_m,

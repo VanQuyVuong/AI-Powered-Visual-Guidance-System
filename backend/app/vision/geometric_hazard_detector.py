@@ -508,13 +508,14 @@ class GeometricHazardDetector:
         dmap: Optional[np.ndarray],
         known_boxes: Optional[List[Dict[str, int]]] = None,
         frame_bgr: Optional[np.ndarray] = None,
-        max_dist_m: float = 1.85,
+        max_dist_m: float = 1.50,
     ) -> Optional[Dict[str, Any]]:
         """
         Phát hiện VẬT CẢN LẠ CHẮN NGANG PHÍA TRƯỚC (như tấm bạt căng ngang, rèm che, tấm ván, thùng lớn)
-        trong phạm vi `<= 1.85m` khi YOLO không có nhãn từ vựng và `detect_wall` bỏ qua do bề mặt
+        trong phạm vi `<= 1.50m` khi YOLO không có nhãn từ vựng và `detect_wall` bỏ qua do bề mặt
         bạt/vải có nếp gấp nhăn (`|dZ/dy|` lớn hơn tường phẳng hoặc có hoa văn/màu sắc không đồng nhất).
-        Quy chung về nhãn chuẩn `"obstacle"` (`"vật cản"`) để cảnh báo tức thì cho người khiếm thị.
+        Chống báo giả tuyệt đối khi đứng cách bức tường phẳng 1.5m - 2.0m (đủ 2 bước chân để đi tiếp):
+        Nếu bề mặt trải phẳng suốt cả 3 làn Trái-Giữa-Phải như bức tường và còn cách > 1.00m thì không báo vật cản!
         """
         if dmap is None or dmap.size == 0:
             return None
@@ -545,10 +546,23 @@ class GeometricHazardDetector:
         # Tấm bạt căng ngang hoặc vật cản treo/đứng chắn lối đi sẽ làm cả nửa trên lẫn vùng giữa có độ sâu <= max_dist_m
         close_mask = ((roi_depth >= 0.25) & (roi_depth <= max_dist_m)).astype(np.uint8)
         close_ratio = float(np.mean(close_mask))
-        upper_close_ratio = float(np.mean((top_half >= 0.25) & (top_half <= max_dist_m + 0.10)))
+        upper_close_ratio = float(np.mean((top_half >= 0.25) & (top_half <= max_dist_m + 0.08)))
 
-        if close_ratio < 0.32 or upper_close_ratio < 0.26:
+        if close_ratio < 0.35 or upper_close_ratio < 0.30:
             return None
+
+        obs_z = float(np.median(roi_depth[close_mask > 0]))
+
+        # KIỂM TRA CHỐNG NHẦM BỨC TƯỜNG CÁCH 1.1m - 1.8m (ĐỦ 2 BƯỚC ĐI) THÀNH "VẬT CẢN":
+        # Nếu cả bên trái, ở giữa và bên phải đều có cùng độ sâu phẳng đồng nhất (chênh lệch < 0.25m, phương sai nhỏ < 0.05)
+        # thì đó là bức tường phẳng ở xa (> 1.00m), người dùng vẫn còn 2 bước chân để đi tiếp -> Không báo vật cản!
+        left_strip = dmap[y1:y2, :max(1, int(w * 0.22))]
+        right_strip = dmap[y1:y2, min(w - 1, int(w * 0.78)):]
+        if left_strip.size > 0 and right_strip.size > 0 and obs_z > 1.00:
+            l_z = float(np.median(left_strip))
+            r_z = float(np.median(right_strip))
+            if abs(l_z - obs_z) < 0.25 and abs(r_z - obs_z) < 0.25 and float(np.std(roi_depth)) < 0.05:
+                return None
 
         ys, xs = np.where(close_mask > 0)
         if ys.size < 20:
@@ -565,7 +579,6 @@ class GeometricHazardDetector:
         if self._is_box_covered(bx1, by1, bx2, by2, known_boxes, thresh=0.25):
             return None
 
-        obs_z = float(np.median(roi_depth[close_mask > 0]))
         dist_m = round(max(0.3, min(obs_z, max_dist_m)), 1)
 
         return {
