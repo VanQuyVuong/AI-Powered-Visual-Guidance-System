@@ -70,12 +70,12 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
     depth_service.trigger_async_compute(frame_bgr)
 
     with _inference_lock:
-        raw_detections, img_width, img_height = run_tracking(image_bytes)
+        raw_detections, img_width, img_height = run_tracking(frame_bgr)
 
     # Kích hoạt EdgeSAM chạy ngầm bổ trợ mặt nạ pixel (0ms latency cho luồng chính)
     sam_service.trigger_async_support(frame_bgr, raw_detections)
 
-    is_on_tactile = detect_tactile_paving(image_bytes)
+    is_on_tactile = detect_tactile_paving(frame_bgr)
     dmap = depth_service.get_latest_depth_map()
 
     all_objects = []
