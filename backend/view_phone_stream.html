@@ -1302,6 +1302,107 @@
                 }
                 descEl.innerText = data.navigation.description || data.navigation.text || "Lối đi thông thoáng";
             }
+
+            // 6. CẬP NHẬT KHUNG TRUNG TÂM MULTI-MODEL FUSION ENGINE
+            renderFusionEngineHud(data);
+        }
+
+        // Cập nhật trực quan 4 bước của Multi-Model Spatial-Temporal Fusion Engine
+        function renderFusionEngineHud(data) {
+            const nav = data.navigation || {};
+            const fs = nav.fusion_summary || {};
+            const branches = fs.model_branches || {};
+            const lanes = fs.lane_clearance || {};
+            const dt = fs.decision_telemetry || {};
+
+            // Bước 1: 4 Nhánh Model AI
+            const rawCnt = fs.raw_candidate_count !== undefined ? fs.raw_candidate_count : (data.objects ? data.objects.length : 0);
+            document.getElementById('fusionRawBadge').innerText = `${rawCnt} ứng viên`;
+
+            if (branches.yolo11) {
+                document.getElementById('branchYoloCount').innerText = `${branches.yolo11.count || 0} obj`;
+                document.getElementById('branchYoloDetail').innerText = branches.yolo11.detail || "Không có vật thể định danh";
+            }
+            if (branches.depth_v2) {
+                document.getElementById('branchDepthStatus').innerText = branches.depth_v2.has_depth ? `${branches.depth_v2.center_m}m` : "Metric Z";
+                document.getElementById('branchDepthDetail').innerText = branches.depth_v2.detail || "T:--m | G:--m | P:--m";
+                const dMedEl = document.getElementById('depthMedianText');
+                if (dMedEl && branches.depth_v2.center_m) {
+                    dMedEl.innerText = `Độ sâu giữa: ${branches.depth_v2.center_m}m`;
+                }
+            }
+            if (branches.edgesam) {
+                document.getElementById('branchSamCount').innerText = `${branches.edgesam.refined_boxes || 0} mask`;
+                document.getElementById('branchSamDetail').innerText = branches.edgesam.detail || "Lọc độ sâu theo pixel mask";
+            }
+            if (branches.segformer_geo) {
+                document.getElementById('branchSegCount').innerText = `${branches.segformer_geo.count || 0} hz`;
+                document.getElementById('branchSegDetail').innerText = branches.segformer_geo.detail || "Mặt sàn & kiến trúc thông thoáng";
+            }
+
+            // Bước 2: Khử trùng lặp IoU & Làm mượt EMA
+            document.getElementById('metricRawCount').innerText = rawCnt;
+            document.getElementById('metricDedupCount').innerText = fs.dedup_removed_count !== undefined ? `${fs.dedup_removed_count} trùng lặp` : "0 trùng lặp";
+            document.getElementById('metricEmaTracks').innerText = `${fs.ema_active_tracks !== undefined ? fs.ema_active_tracks : rawCnt} tracks`;
+            const dangerCnt = fs.danger_obstacle_count !== undefined ? fs.danger_obstacle_count : 0;
+            const dangerEl = document.getElementById('metricDangerCount');
+            dangerEl.innerText = `${dangerCnt} nguy hiểm / ${fs.fused_obstacle_count !== undefined ? fs.fused_obstacle_count : rawCnt} vật thể`;
+            dangerEl.style.color = dangerCnt > 0 ? "var(--neon-red)" : "var(--neon-green)";
+
+            // Bước 3: Ma trận khoảng trống 3 làn
+            const instantAct = fs.instant_action || "GO_STRAIGHT";
+            const actEl = document.getElementById('fusionInstantAction');
+            actEl.innerText = instantAct;
+            actEl.style.color = instantAct === "GO_STRAIGHT" ? "var(--neon-green)" : (instantAct === "TURN_AROUND" ? "var(--neon-red)" : "var(--neon-amber)");
+
+            const updateLaneBar = (laneObj, textId, barId) => {
+                if (!laneObj) return;
+                const distM = laneObj.clear_distance_m !== undefined ? laneObj.clear_distance_m : 3.5;
+                const blocked = Boolean(laneObj.is_blocked);
+                const hz = laneObj.primary_hazard ? ` (${laneObj.primary_hazard})` : "";
+                const tEl = document.getElementById(textId);
+                const bEl = document.getElementById(barId);
+                if (tEl) {
+                    tEl.innerText = `${distM.toFixed(1)}m • ${blocked ? 'CHẮN' + hz : 'TRỐNG'}`;
+                    tEl.style.color = blocked ? "var(--neon-red)" : "var(--neon-green)";
+                }
+                if (bEl) {
+                    const pct = Math.max(12, Math.min(100, Math.round((distM / 4.0) * 100)));
+                    bEl.style.width = `${pct}%`;
+                    if (blocked) bEl.classList.add('blocked');
+                    else bEl.classList.remove('blocked');
+                }
+            };
+            updateLaneBar(lanes.left, 'laneLeftText', 'laneLeftBar');
+            updateLaneBar(lanes.center, 'laneCenterText', 'laneCenterBar');
+            updateLaneBar(lanes.right, 'laneRightText', 'laneRightBar');
+
+            // Bước 4: Máy trạng thái Guided Scan & Lời cảnh báo
+            const statePill = document.getElementById('decisionStatePill');
+            const stateCode = dt.state_code || "CLEAR";
+            if (statePill) {
+                statePill.innerText = dt.state_label || "ĐI THẲNG AN TOÀN (CLEAR)";
+                statePill.className = "decision-state-pill";
+                if (stateCode === "TURN_AROUND" || stateCode === "STEPS") {
+                    statePill.classList.add('danger');
+                } else if (stateCode.startsWith("TURN_") || stateCode.startsWith("ALLEY_DRIFT")) {
+                    statePill.classList.add('warn');
+                }
+            }
+            const framesEl = document.getElementById('decisionFramesText');
+            if (framesEl) {
+                framesEl.innerText = `Clear: ${dt.clear_frames || 0}f | Block: ${dt.blocked_frames || 0}f`;
+            }
+            const trigBadge = document.getElementById('ttsTriggerBadge');
+            if (trigBadge) {
+                if (dt.spoken_this_frame) {
+                    trigBadge.innerText = "🔊 PHÁT NGAY (0ms)";
+                    trigBadge.style.color = "var(--neon-amber)";
+                } else {
+                    trigBadge.innerText = `CHỐNG LẶP (${dt.since_last_speech_s || 0}s)`;
+                    trigBadge.style.color = "var(--neon-cyan)";
+                }
+            }
         }
 
         // Vẽ Canvas Bounding Box cho YOLO khớp 100% với vùng hiển thị của ảnh (khử triệt để lỗi lệch viền letterbox)
@@ -1410,9 +1511,10 @@
                 const dist = obj.distance_m ? `${obj.distance_m.toFixed(1)}m` : "--";
                 const isDanger = obj.is_danger || obj.in_roi;
                 const pos = obj.position === "center" ? "Giữa" : (obj.position === "left" ? "Trái" : "Phải");
+                const src = obj.source_model ? `<span class="source-tag">${obj.source_model}</span>` : "";
                 html += `
                     <div class="obj-row ${isDanger ? 'danger' : ''}">
-                        <span class="obj-name">${isDanger ? '⚠️ ' : ''}${name} (${pos})</span>
+                        <span class="obj-name">${isDanger ? '⚠️ ' : ''}${name} (${pos})${src}</span>
                         <span class="obj-dist">${dist}</span>
                     </div>
                 `;
