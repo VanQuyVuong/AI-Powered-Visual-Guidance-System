@@ -50,6 +50,7 @@ from app.vision.guided_scan import (  # noqa: E402
     voice_state as _voice_state,
     reset_voice_state,
     update_spatial_scan_and_voice,
+    get_decision_telemetry,
 )
 
 
@@ -262,6 +263,8 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         now,
     )
     guidance_data["priority"] = cur_prio
+    if isinstance(nav_data.get("fusion_summary"), dict):
+        nav_data["fusion_summary"]["decision_telemetry"] = get_decision_telemetry(now)
 
     if should_speak_now:
         guidance_data["display_text"] = cur_text

@@ -398,6 +398,10 @@ def update_spatial_scan_and_voice(
             should_speak = True
             st["pending_post_turn_reconfirm"] = False
 
+    st["current_status"] = status
+    st["current_sig"] = sig
+    st["last_spoken_flag"] = should_speak
+
     if should_speak:
         st["last_text"] = target_text
         st["last_priority"] = target_prio
@@ -407,3 +411,35 @@ def update_spatial_scan_and_voice(
         return target_text, target_prio, True
 
     return (st["last_text"] or target_text), st["last_priority"] if st["last_text"] else target_prio, False
+
+
+def get_decision_telemetry(now: Optional[float] = None) -> dict:
+    """
+    Trích xuất thông tin máy trạng thái quyết định (Guided Scan State Machine)
+    và trạng thái điều tiết giọng nói (Voice Throttle / Queue) phục vụ hiển thị trực quan trên Dashboard.
+    """
+    st = voice_state
+    status = st.get("current_status") or "CLEAR"
+    last_time = float(st.get("last_time", 0.0) or 0.0)
+    since_s = round(max(0.0, (now - last_time)), 1) if (now and last_time > 0) else 0.0
+
+    state_labels = {
+        "CLEAR": "ĐI THẲNG AN TOÀN (CLEAR)",
+        "ALLEY_CLEAR": "CHẾ ĐỘ ĐI HẺM TĨNH LẶNG (ALLEY_CLEAR)",
+        "ALLEY_DRIFT_LEFT": "CHỈNH LỆCH TƯỜNG TRÁI (ALLEY_DRIFT_LEFT)",
+        "ALLEY_DRIFT_RIGHT": "CHỈNH LỆCH TƯỜNG PHẢI (ALLEY_DRIFT_RIGHT)",
+        "TURN_LEFT": "CHỈ HƯỚNG RẼ TRÁI (TURN_LEFT)",
+        "TURN_RIGHT": "CHỈ HƯỚNG RẼ PHẢI (TURN_RIGHT)",
+        "TURN_AROUND": "NGÕ CỤT - QUAY ĐẦU (TURN_AROUND)",
+        "STEPS": "CẢNH BÁO DƯỚI CHÂN P0 (STEPS / DROPOFF)",
+    }
+
+    return {
+        "state_code": status,
+        "state_label": state_labels.get(status, status),
+        "clear_frames": int(st.get("clear_frames", 0)),
+        "blocked_frames": int(st.get("blocked_frames", 0)),
+        "since_last_speech_s": since_s,
+        "spoken_this_frame": bool(st.get("last_spoken_flag", False)),
+        "voice_engine": "Blaze AI TTS + Android Native QUEUE_ADD",
+    }
