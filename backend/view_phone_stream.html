@@ -514,13 +514,14 @@
         .fusion-pipeline-grid {
             display: grid;
             grid-template-columns: 1.35fr 1fr 1.15fr 1.1fr;
-            gap: 12px;
+            gap: 18px;
             align-items: stretch;
         }
 
         @media (max-width: 1200px) {
             .fusion-pipeline-grid {
                 grid-template-columns: 1fr 1fr;
+                gap: 12px;
             }
         }
 
@@ -533,6 +534,21 @@
             flex-direction: column;
             gap: 7px;
             position: relative;
+        }
+
+        @media (min-width: 1201px) {
+            .fusion-stage-card:not(:last-child)::after {
+                content: "➔";
+                position: absolute;
+                right: -15px;
+                top: 50%;
+                transform: translateY(-50%);
+                color: var(--neon-cyan);
+                font-size: 0.9rem;
+                font-weight: 800;
+                opacity: 0.75;
+                pointer-events: none;
+            }
         }
 
         .fusion-stage-header {
@@ -612,7 +628,7 @@
 
         .lane-row {
             display: flex;
-             flex-direction: column;
+            flex-direction: column;
             gap: 3px;
         }
 
@@ -675,6 +691,16 @@
             background: rgba(0, 240, 255, 0.14);
             color: var(--neon-cyan);
             margin-left: 5px;
+        }
+
+        .fusion-code-badge {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.76rem;
+            background: rgba(0, 240, 255, 0.12);
+            color: var(--neon-cyan);
+            padding: 1px 6px;
+            border-radius: 5px;
+            border: 1px solid rgba(0, 240, 255, 0.25);
         }
     </style>
 </head>
@@ -823,7 +849,7 @@
         <div class="fusion-engine-section" id="fusionEngineSection">
             <div class="fusion-header">
                 <div class="fusion-title">
-                    <span>🧠</span> BỘ TỔNG HỢP ĐA MÔ HÌNH: MULTI-MODEL SPATIAL-TEMPORAL FUSION ENGINE (`fusion_engine.py` + `guided_scan.py`)
+                    <span>🧠</span> BỘ TỔNG HỢP ĐA MÔ HÌNH: MULTI-MODEL SPATIAL-TEMPORAL FUSION ENGINE <span class="fusion-code-badge">fusion_engine.py</span> + <span class="fusion-code-badge">guided_scan.py</span>
                 </div>
                 <div class="fusion-subtitle" id="fusionHeaderMeta">
                     4 AI Models Active • IoU Deduplication • EMA Smoothing (α=0.65) • Real-time 3-Lane Decision
@@ -961,7 +987,7 @@
             <!-- HƯỚNG DẪN GIỌNG NÓI -->
             <div class="hud-card">
                 <div class="hud-title">
-                    <span>📢</span> HƯỚNG DẪN & CẢNH BÁO TỨC THÌ (TTS BLACE)
+                    <span>📢</span> HƯỚNG DẪN & CẢNH BÁO TỨC THÌ (BLAZE AI TTS & NATIVE VOICE)
                 </div>
                 <div class="guidance-banner" id="guidanceBanner">
                     <div class="guidance-icon" id="guidanceIcon">🛡️</div>
@@ -1213,6 +1239,11 @@
             if (delta > 0) {
                 const fps = Math.round(1000 / delta);
                 document.getElementById('fpsText').innerText = Math.min(30, Math.max(1, fps));
+            }
+            if (data.processing_ms !== undefined && data.processing_ms !== null) {
+                document.getElementById('latencyText').innerText = `${Math.round(data.processing_ms)} ms`;
+            } else if (delta > 0) {
+                document.getElementById('latencyText').innerText = `${Math.round(delta)} ms`;
             }
 
             // 2. MÀN HÌNH 1: YOLO STREAM
