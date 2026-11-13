@@ -109,6 +109,7 @@ class MultiModelFusionEngine:
         img_width: int,
         img_height: int,
         now: Optional[float] = None,
+        sam_mask_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Hợp nhất toàn bộ kết quả từ các model, khử xung đột và trả về:
@@ -158,8 +159,8 @@ class MultiModelFusionEngine:
             c_box = cand.get("bounding_box", {})
             c_prio = SEMANTIC_PRIORITY.get(c_name, 60)
 
-            # Nếu đã có vật cản cụ thể (ghế, bàn, cột nhà, cầu thang) ở làn giữa thì loại bỏ nhãn "wall" chung chung đè lên
-            if c_name == "wall" and has_specific_center_hazard:
+            # Nếu đã có vật cản cụ thể (ghế, bàn, cột nhà, cầu thang) ở làn giữa thì loại bỏ nhãn "wall"/"obstacle" chung chung đè lên
+            if c_name in ("wall", "obstacle") and has_specific_center_hazard:
                 continue
 
             is_duplicate = False
@@ -191,11 +192,13 @@ class MultiModelFusionEngine:
             dist_val = float(cand.get("distance_m") if cand.get("distance_m") is not None else 9.9)
             pos_val = str(cand.get("position", "center"))
             if c_name == "wall":
-                cand["is_danger"] = dist_val <= 1.35
-            elif c_name in ("stairs", "step"):
+                cand["is_danger"] = dist_val <= 1.00
+            elif c_name in ("stairs", "step", "dropoff"):
                 cand["is_danger"] = dist_val <= 2.40
             elif c_name in ("column", "pillar"):
                 cand["is_danger"] = dist_val <= 1.85
+            elif c_name == "obstacle":
+                cand["is_danger"] = dist_val <= 1.50
             else:
                 in_path = bool(cand.get("in_roi")) or (pos_val == "center")
                 cand["is_danger"] = (in_path and dist_val <= 2.25) or (dist_val <= 1.65)
@@ -219,7 +222,7 @@ class MultiModelFusionEngine:
             nearest_obj = min(lane_objs, key=lambda x: float(x.get("distance_m") or 9.9)) if lane_objs else None
             nearest_dist = float(nearest_obj.get("distance_m")) if (nearest_obj and nearest_obj.get("distance_m") is not None) else med_m
             eff_clear_m = round(min(med_m, nearest_dist), 2)
-            is_blocked = bool(lane_objs) or bool(d_info.get("is_blocked", False) and med_m <= 1.30)
+            is_blocked = bool(lane_objs) or bool(d_info.get("is_blocked", False) and med_m <= 1.00)
 
             lane_clearance[lane_name] = {
                 "clear_distance_m": eff_clear_m,
@@ -243,17 +246,107 @@ class MultiModelFusionEngine:
         else:
             instant_action = "TURN_AROUND"
 
+        model_branches = self._build_model_branch_breakdown(
+            yolo_objects=yolo_objects or [],
+            structural_hazards=structural_hazards or [],
+            sam_obstacles=sam_obstacles or [],
+            depth_lanes=depth_lanes,
+            fused=fused,
+            sam_mask_count=sam_mask_count,
+        )
+        danger_count = sum(1 for o in fused if o.get("is_danger"))
+
         return {
             "fused_objects": fused,
             "fusion_summary": {
                 "active_models": ["YOLO11", "DepthAnythingV2", "EdgeSAM", "SegFormer+Geometric3D"],
                 "raw_candidate_count": len(candidates),
                 "fused_obstacle_count": len(fused),
+                "danger_obstacle_count": danger_count,
+                "dedup_removed_count": max(0, len(candidates) - len(fused)),
+                "ema_active_tracks": len(self._temporal_tracks),
+                "model_branches": model_branches,
                 "lane_clearance": lane_clearance,
                 "instant_action": instant_action,
+            },
+        }
+
+    def _build_model_branch_breakdown(
+        self,
+        yolo_objects: List[Dict[str, Any]],
+        structural_hazards: List[Dict[str, Any]],
+        sam_obstacles: List[Dict[str, Any]],
+        depth_lanes: Optional[Dict[str, Any]],
+        fused: List[Dict[str, Any]],
+        sam_mask_count: Optional[int] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Thống kê chi tiết thông tin thu thập được từ từng nhánh trong 4 mô hình AI
+        để hiển thị trực quan trên bảng điều khiển báo cáo hội đồng.
+        """
+        yolo_names = [
+            (o.get("class_name_vn") or o.get("class_name") or "vật thể")
+            for o in yolo_objects
+        ]
+        struct_names = [
+            (h.get("class_name_vn") or h.get("class_name") or "cấu trúc")
+            for h in structural_hazards
+        ]
+        sam_names = [
+            (s.get("class_name_vn") or s.get("class_name") or "mặt nạ pixel")
+            for s in sam_obstacles
+        ]
+
+        lanes_raw = (depth_lanes or {}).get("lanes", {}) if depth_lanes else {}
+        c_med = float(lanes_raw.get("center", {}).get("median_m", 3.5) or 3.5)
+        l_med = float(lanes_raw.get("left", {}).get("median_m", 3.5) or 3.5)
+        r_med = float(lanes_raw.get("right", {}).get("median_m", 3.5) or 3.5)
+
+        refined_cnt = sum(1 for o in yolo_objects if o.get("sam_mask_refined"))
+        active_masks = int(sam_mask_count) if sam_mask_count is not None else max(refined_cnt, len(sam_obstacles))
+        if sam_obstacles or refined_cnt > 0 or active_masks > 0:
+            sam_detail = f"{active_masks} mặt nạ • lọc Z {refined_cnt} box" + (
+                f" • +{len(sam_obstacles)} vật lạ" if sam_obstacles else ""
+            )
+        else:
+            sam_detail = "Đang quét mặt nạ pixel ngầm (320px)"
+
+        return {
+            "yolo11": {
+                "model_name": "YOLO11n + ByteTrack",
+                "role": "Nhận diện & bám vết vật thể định danh",
+                "count": len(yolo_objects),
+                "items": yolo_names[:3],
+                "detail": ", ".join(yolo_names[:3]) if yolo_names else "Không có vật thể định danh",
+            },
+            "depth_v2": {
+                "model_name": "Depth Anything V2",
+                "role": "Đo khoảng cách Metric 3D (Z mét)",
+                "has_depth": bool(lanes_raw),
+                "center_m": round(c_med, 2),
+                "left_m": round(l_med, 2),
+                "right_m": round(r_med, 2),
+                "detail": f"T:{l_med:.1f}m | G:{c_med:.1f}m | P:{r_med:.1f}m",
+            },
+            "edgesam": {
+                "model_name": "EdgeSAM (RepViT)",
+                "role": "Lọc độ sâu theo Pixel Mask & bắt vật lạ",
+                "count": len(sam_obstacles),
+                "active_masks": active_masks,
+                "refined_boxes": refined_cnt,
+                "items": sam_names[:2],
+                "detail": sam_detail,
+            },
+            "segformer_geo": {
+                "model_name": "SegFormer + Geometric 3D",
+                "role": "Bắt cầu thang, hố sâu, tường, cột, tấm bạt",
+                "count": len(structural_hazards),
+                "items": struct_names[:3],
+                "detail": ", ".join(struct_names[:3]) if struct_names else "Mặt sàn & kiến trúc thông thoáng",
             },
         }
 
 
 # Singleton dùng chung trong toàn bộ pipeline
 fusion_engine = MultiModelFusionEngine()
+

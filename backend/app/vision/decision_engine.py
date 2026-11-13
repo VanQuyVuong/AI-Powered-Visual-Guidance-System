@@ -155,7 +155,8 @@ VOCAB = {
     "threshold": "bậc thềm",
     "multi_obstacle": "nhiều vật cản",
     "obstacle": "vật cản",
-    "pothole": "ổ gà"
+    "pothole": "ổ gà",
+    "dropoff": "hố sâu"
 }
 
 SMALL_CLUTTER_CLASSES = {

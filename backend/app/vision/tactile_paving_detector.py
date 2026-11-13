@@ -1,25 +1,28 @@
 import cv2
 import numpy as np
 
-def detect_tactile_paving(image_bytes: bytes) -> bool:
+def detect_tactile_paving(image_or_bytes) -> bool:
     """
     Thuật toán nhận diện đường gạch nổi (Tactile Paving) cho người khiếm thị.
     Dựa trên đặc trưng màu VÀNG đặc trưng ở làn bước chân trung tâm (walking corridor).
-    Trả về True nếu phát hiện người dùng đang thực sự đi trên dải gạch nổi màu vàng.
+    Hỗ trợ truyền trực tiếp `frame_bgr` (np.ndarray) hoặc `image_bytes` để tránh giải mã JPEG lặp lại.
     """
-    # 1. Kiểm tra tính hợp lệ và giải mã ảnh từ bytes
-    if not image_bytes:
-        return False
+    # 1. Kiểm tra tính hợp lệ và lấy frame BGR
+    if isinstance(image_or_bytes, np.ndarray):
+        if image_or_bytes.size == 0:
+            return False
+        img = image_or_bytes
+    else:
+        if not image_or_bytes:
+            return False
+        nparr = np.frombuffer(image_or_bytes, np.uint8)
+        if nparr.size == 0:
+            return False
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    if nparr.size == 0:
-        return False
-
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    
     if img is None:
         return False
-        
+
     height, width, _ = img.shape
     
     # 2. Cắt lấy làn bước chân trung tâm (60% chiều rộng ở giữa, 40% chiều cao phía dưới chân)
