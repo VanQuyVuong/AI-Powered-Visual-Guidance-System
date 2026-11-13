@@ -440,6 +440,7 @@ def get_decision_telemetry(now: Optional[float] = None) -> dict:
         "clear_frames": int(st.get("clear_frames", 0)),
         "blocked_frames": int(st.get("blocked_frames", 0)),
         "since_last_speech_s": since_s,
+        "last_speech_ts": round(last_time, 3),
         "spoken_this_frame": bool(st.get("last_spoken_flag", False)),
         "voice_engine": "Blaze AI TTS + Android Native QUEUE_ADD",
     }
