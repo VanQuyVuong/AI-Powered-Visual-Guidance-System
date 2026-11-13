@@ -245,17 +245,99 @@ class MultiModelFusionEngine:
         else:
             instant_action = "TURN_AROUND"
 
+        model_branches = self._build_model_branch_breakdown(
+            yolo_objects=yolo_objects or [],
+            structural_hazards=structural_hazards or [],
+            sam_obstacles=sam_obstacles or [],
+            depth_lanes=depth_lanes,
+            fused=fused,
+        )
+        danger_count = sum(1 for o in fused if o.get("is_danger"))
+
         return {
             "fused_objects": fused,
             "fusion_summary": {
                 "active_models": ["YOLO11", "DepthAnythingV2", "EdgeSAM", "SegFormer+Geometric3D"],
                 "raw_candidate_count": len(candidates),
                 "fused_obstacle_count": len(fused),
+                "danger_obstacle_count": danger_count,
+                "dedup_removed_count": max(0, len(candidates) - len(fused)),
+                "ema_active_tracks": len(self._temporal_tracks),
+                "model_branches": model_branches,
                 "lane_clearance": lane_clearance,
                 "instant_action": instant_action,
+            },
+        }
+
+    def _build_model_branch_breakdown(
+        self,
+        yolo_objects: List[Dict[str, Any]],
+        structural_hazards: List[Dict[str, Any]],
+        sam_obstacles: List[Dict[str, Any]],
+        depth_lanes: Optional[Dict[str, Any]],
+        fused: List[Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Thống kê chi tiết thông tin thu thập được từ từng nhánh trong 4 mô hình AI
+        để hiển thị trực quan trên bảng điều khiển báo cáo hội đồng.
+        """
+        yolo_names = [
+            (o.get("class_name_vn") or o.get("class_name") or "vật thể")
+            for o in yolo_objects
+        ]
+        struct_names = [
+            (h.get("class_name_vn") or h.get("class_name") or "cấu trúc")
+            for h in structural_hazards
+        ]
+        sam_names = [
+            (s.get("class_name_vn") or s.get("class_name") or "mặt nạ pixel")
+            for s in sam_obstacles
+        ]
+
+        lanes_raw = (depth_lanes or {}).get("lanes", {}) if depth_lanes else {}
+        c_med = float(lanes_raw.get("center", {}).get("median_m", 3.5) or 3.5)
+        l_med = float(lanes_raw.get("left", {}).get("median_m", 3.5) or 3.5)
+        r_med = float(lanes_raw.get("right", {}).get("median_m", 3.5) or 3.5)
+
+        return {
+            "yolo11": {
+                "model_name": "YOLO11n + ByteTrack",
+                "role": "Nhận diện & bám vết vật thể định danh",
+                "count": len(yolo_objects),
+                "items": yolo_names[:3],
+                "detail": ", ".join(yolo_names[:3]) if yolo_names else "Không có vật thể định danh",
+            },
+            "depth_v2": {
+                "model_name": "Depth Anything V2",
+                "role": "Đo khoảng cách Metric 3D (Z mét)",
+                "has_depth": bool(lanes_raw),
+                "center_m": round(c_med, 2),
+                "left_m": round(l_med, 2),
+                "right_m": round(r_med, 2),
+                "detail": f"T:{l_med:.1f}m | G:{c_med:.1f}m | P:{r_med:.1f}m",
+            },
+            "edgesam": {
+                "model_name": "EdgeSAM (RepViT)",
+                "role": "Lọc độ sâu theo Pixel Mask & bắt vật lạ",
+                "count": len(sam_obstacles),
+                "refined_boxes": len(yolo_objects),
+                "items": sam_names[:2],
+                "detail": (
+                    f"Phát hiện {len(sam_obstacles)} vật lạ + lọc mask {len(yolo_objects)} box"
+                    if (sam_obstacles or yolo_objects)
+                    else "Đang quét mặt nạ pixel ngầm (320px)"
+                ),
+            },
+            "segformer_geo": {
+                "model_name": "SegFormer + Geometric 3D",
+                "role": "Bắt cầu thang, hố sâu, tường, cột, tấm bạt",
+                "count": len(structural_hazards),
+                "items": struct_names[:3],
+                "detail": ", ".join(struct_names[:3]) if struct_names else "Mặt sàn & kiến trúc thông thoáng",
             },
         }
 
 
 # Singleton dùng chung trong toàn bộ pipeline
 fusion_engine = MultiModelFusionEngine()
+
