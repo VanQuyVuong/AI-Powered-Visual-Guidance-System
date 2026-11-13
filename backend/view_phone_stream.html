@@ -819,6 +819,142 @@
 
         </div>
 
+        <!-- KHUNG TRUNG TÂM TỔNG HỢP: MULTI-MODEL SPATIAL-TEMPORAL FUSION ENGINE -->
+        <div class="fusion-engine-section" id="fusionEngineSection">
+            <div class="fusion-header">
+                <div class="fusion-title">
+                    <span>🧠</span> BỘ TỔNG HỢP ĐA MÔ HÌNH: MULTI-MODEL SPATIAL-TEMPORAL FUSION ENGINE (`fusion_engine.py` + `guided_scan.py`)
+                </div>
+                <div class="fusion-subtitle" id="fusionHeaderMeta">
+                    4 AI Models Active • IoU Deduplication • EMA Smoothing (α=0.65) • Real-time 3-Lane Decision
+                </div>
+            </div>
+
+            <div class="fusion-pipeline-grid">
+                <!-- BƯỚC 1: THU THẬP TỪ 4 NHÁNH MODEL -->
+                <div class="fusion-stage-card">
+                    <div class="fusion-stage-header">
+                        <span>① ĐẦU VÀO TỪ 4 NHÁNH MODEL AI</span>
+                        <span style="color: var(--neon-cyan);" id="fusionRawBadge">0 ứng viên</span>
+                    </div>
+                    <div class="branch-list">
+                        <div class="branch-item">
+                            <div class="branch-name">
+                                <span>📹 YOLO11n</span>
+                                <span id="branchYoloCount">0</span>
+                            </div>
+                            <div class="branch-detail" id="branchYoloDetail">Chờ nhận diện...</div>
+                        </div>
+                        <div class="branch-item b-depth">
+                            <div class="branch-name">
+                                <span>🌊 Depth V2</span>
+                                <span id="branchDepthStatus">Metric Z</span>
+                            </div>
+                            <div class="branch-detail" id="branchDepthDetail">T:--m | G:--m | P:--m</div>
+                        </div>
+                        <div class="branch-item b-sam">
+                            <div class="branch-name">
+                                <span>🧩 EdgeSAM</span>
+                                <span id="branchSamCount">Mask 320p</span>
+                            </div>
+                            <div class="branch-detail" id="branchSamDetail">Lọc độ sâu theo pixel mask</div>
+                        </div>
+                        <div class="branch-item b-seg">
+                            <div class="branch-name">
+                                <span>📐 SegFormer+3D</span>
+                                <span id="branchSegCount">0</span>
+                            </div>
+                            <div class="branch-detail" id="branchSegDetail">Cầu thang / Hố sâu / Tường</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BƯỚC 2: KHỬ TRÙNG LẶP IOU & LÀM MƯỢT EMA -->
+                <div class="fusion-stage-card">
+                    <div class="fusion-stage-header">
+                        <span>② HỢP NHẤT KHÔNG GIAN - THỜI GIAN</span>
+                        <span style="color: var(--neon-green);">IoU + EMA</span>
+                    </div>
+                    <div class="fusion-metrics-list">
+                        <div class="fusion-metric-row">
+                            <span>Tổng ứng viên thô (Raw):</span>
+                            <span class="fusion-metric-val" id="metricRawCount">0</span>
+                        </div>
+                        <div class="fusion-metric-row">
+                            <span>Đã gộp trùng không gian (IoU ≥ 0.35):</span>
+                            <span class="fusion-metric-val" id="metricDedupCount">0</span>
+                        </div>
+                        <div class="fusion-metric-row">
+                            <span>Quỹ đạo làm mượt EMA (α=0.65):</span>
+                            <span class="fusion-metric-val" id="metricEmaTracks">0 tracks</span>
+                        </div>
+                        <div class="fusion-metric-row">
+                            <span>Vật cản nguy hiểm sau hợp nhất:</span>
+                            <span class="fusion-metric-val" style="color: var(--neon-red);" id="metricDangerCount">0 nguy hiểm</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BƯỚC 3: MA TRẬN KHOẢNG TRỐNG 3 LÀN -->
+                <div class="fusion-stage-card">
+                    <div class="fusion-stage-header">
+                        <span>③ MA TRẬN KHOẢNG TRỐNG 3 LÀN</span>
+                        <span id="fusionInstantAction" style="color: var(--neon-green);">GO_STRAIGHT</span>
+                    </div>
+                    <div class="lane-matrix-rows">
+                        <div class="lane-row">
+                            <div class="lane-row-top">
+                                <span>⬅️ Làn Trái (Left)</span>
+                                <span id="laneLeftText">3.5m • TRỐNG</span>
+                            </div>
+                            <div class="lane-bar-track">
+                                <div class="lane-bar-fill" id="laneLeftBar" style="width: 85%;"></div>
+                            </div>
+                        </div>
+                        <div class="lane-row">
+                            <div class="lane-row-top">
+                                <span>⬆️ Làn Giữa (Center ROI)</span>
+                                <span id="laneCenterText">3.5m • TRỐNG</span>
+                            </div>
+                            <div class="lane-bar-track">
+                                <div class="lane-bar-fill" id="laneCenterBar" style="width: 85%;"></div>
+                            </div>
+                        </div>
+                        <div class="lane-row">
+                            <div class="lane-row-top">
+                                <span>➡️ Làn Phải (Right)</span>
+                                <span id="laneRightText">3.5m • TRỐNG</span>
+                            </div>
+                            <div class="lane-bar-track">
+                                <div class="lane-bar-fill" id="laneRightBar" style="width: 85%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BƯỚC 4: MÁY TRẠNG THÁI QUYẾT ĐỊNH & GIỌNG NÓI -->
+                <div class="fusion-stage-card">
+                    <div class="fusion-stage-header">
+                        <span>④ MÁY TRẠNG THÁI & LỜI CẢNH BÁO</span>
+                        <span id="ttsTriggerBadge" style="color: var(--neon-cyan);">CHỜ QUÉT</span>
+                    </div>
+                    <div class="decision-state-pill" id="decisionStatePill">
+                        ĐI THẲNG AN TOÀN (CLEAR)
+                    </div>
+                    <div class="fusion-metrics-list" style="margin-top: 2px;">
+                        <div class="fusion-metric-row">
+                            <span>Chuỗi frame ổn định:</span>
+                            <span class="fusion-metric-val" id="decisionFramesText">Clear: 0 | Block: 0</span>
+                        </div>
+                        <div class="fusion-metric-row">
+                            <span>Đầu ra giọng nói:</span>
+                            <span class="fusion-metric-val" style="font-size: 0.68rem;" id="decisionVoiceEngine">Blaze TTS + QUEUE_ADD</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- BẢNG DẪN ĐƯỜNG TRUNG TÂM (NAVIGATION & GUIDANCE) -->
         <div class="bottom-hud">
             
