@@ -449,6 +449,12 @@ class SamService:
                 break
         return extra_obstacles
 
+    def get_active_mask_count(self, max_age_s: float = 4.0) -> int:
+        """Trả về số lượng mặt nạ EdgeSAM hiện đang còn hiệu lực trong bộ đệm nền."""
+        if not self._latest_masks or (time.time() - self._latest_masks_time) > max_age_s:
+            return 0
+        return len(self._latest_masks)
+
 
 # Singleton dùng chung toàn backend
 sam_service = SamService()

@@ -162,7 +162,8 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
             "bounding_box": box,
             "in_roi": in_corridor or in_path,
             "distance_m": dist_m,
-            "is_danger": is_danger
+            "is_danger": is_danger,
+            "sam_mask_refined": sam_mask_dist is not None,
         })
 
     # 4. CHẠY PHÁT HIỆN CỘT NHÀ, BỨC TƯỜNG, BẬC THỀM, CẦU THANG & VẬT CẢN LẠ (KẾT HỢP DEPTH + GEOMETRIC + EDGESAM)
@@ -197,6 +198,7 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         img_width=img_width,
         img_height=img_height,
         now=now,
+        sam_mask_count=sam_service.get_active_mask_count(),
     )
     all_objects = fusion_result["fused_objects"]
 

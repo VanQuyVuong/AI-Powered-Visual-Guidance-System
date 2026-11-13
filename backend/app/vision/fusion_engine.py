@@ -109,6 +109,7 @@ class MultiModelFusionEngine:
         img_width: int,
         img_height: int,
         now: Optional[float] = None,
+        sam_mask_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Hợp nhất toàn bộ kết quả từ các model, khử xung đột và trả về:
@@ -251,6 +252,7 @@ class MultiModelFusionEngine:
             sam_obstacles=sam_obstacles or [],
             depth_lanes=depth_lanes,
             fused=fused,
+            sam_mask_count=sam_mask_count,
         )
         danger_count = sum(1 for o in fused if o.get("is_danger"))
 
@@ -276,6 +278,7 @@ class MultiModelFusionEngine:
         sam_obstacles: List[Dict[str, Any]],
         depth_lanes: Optional[Dict[str, Any]],
         fused: List[Dict[str, Any]],
+        sam_mask_count: Optional[int] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Thống kê chi tiết thông tin thu thập được từ từng nhánh trong 4 mô hình AI
@@ -299,6 +302,15 @@ class MultiModelFusionEngine:
         l_med = float(lanes_raw.get("left", {}).get("median_m", 3.5) or 3.5)
         r_med = float(lanes_raw.get("right", {}).get("median_m", 3.5) or 3.5)
 
+        refined_cnt = sum(1 for o in yolo_objects if o.get("sam_mask_refined"))
+        active_masks = int(sam_mask_count) if sam_mask_count is not None else max(refined_cnt, len(sam_obstacles))
+        if sam_obstacles or refined_cnt > 0 or active_masks > 0:
+            sam_detail = f"{active_masks} mặt nạ • lọc Z {refined_cnt} box" + (
+                f" • +{len(sam_obstacles)} vật lạ" if sam_obstacles else ""
+            )
+        else:
+            sam_detail = "Đang quét mặt nạ pixel ngầm (320px)"
+
         return {
             "yolo11": {
                 "model_name": "YOLO11n + ByteTrack",
@@ -320,13 +332,10 @@ class MultiModelFusionEngine:
                 "model_name": "EdgeSAM (RepViT)",
                 "role": "Lọc độ sâu theo Pixel Mask & bắt vật lạ",
                 "count": len(sam_obstacles),
-                "refined_boxes": len(yolo_objects),
+                "active_masks": active_masks,
+                "refined_boxes": refined_cnt,
                 "items": sam_names[:2],
-                "detail": (
-                    f"Phát hiện {len(sam_obstacles)} vật lạ + lọc mask {len(yolo_objects)} box"
-                    if (sam_obstacles or yolo_objects)
-                    else "Đang quét mặt nạ pixel ngầm (320px)"
-                ),
+                "detail": sam_detail,
             },
             "segformer_geo": {
                 "model_name": "SegFormer + Geometric 3D",
