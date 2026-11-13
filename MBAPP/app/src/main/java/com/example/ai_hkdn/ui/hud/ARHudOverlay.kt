@@ -24,6 +24,7 @@ fun ARHudOverlay(
     imageSourceWidth: Int = 480, // Chiều rộng frame sau khi xoay dọc
     imageSourceHeight: Int = 640, // Chiều cao frame sau khi xoay dọc
     showRoi: Boolean = true,
+    showBoxes: Boolean = false, // Ẩn bounding box trên điện thoại (tránh lệch do trễ mạng khi lia cam), hiển thị phân tích đầy đủ trên Laptop
     modifier: Modifier = Modifier
 ) {
     Canvas(modifier = modifier.fillMaxSize()) {
@@ -35,6 +36,8 @@ fun ARHudOverlay(
             drawPerspectiveRoi(screenW, screenH)
         }
 
+        if (!showBoxes) return@Canvas
+
         // Khớp 1:1 với chế độ PreviewView.ScaleType.FILL_CENTER của camera:
         // Phóng to đồng dạng theo cạnh lớn nhất và căn giữa khung hình (tránh méo tỷ lệ)
         val srcW = imageSourceWidth.coerceAtLeast(1).toFloat()
@@ -43,7 +46,7 @@ fun ARHudOverlay(
         val offsetX = (screenW - srcW * scale) / 2f
         val offsetY = (screenH - srcH * scale) / 2f
 
-        // 2. Vẽ các vật thể phát hiện được
+        // 2. Vẽ các vật thể phát hiện được (nếu bật showBoxes)
         objects.forEach { obj ->
             val box = obj.boundingBox
             val left = box.x1 * scale + offsetX

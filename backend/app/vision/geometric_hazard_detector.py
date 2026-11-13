@@ -219,14 +219,16 @@ class GeometricHazardDetector:
             return None
 
         # KIỂM TRA CHỐNG NHẦM TƯỜNG PHẲNG / THÂN TỦ CÓ KỆ NGANG THÀNH CẦU THANG:
-        # Cầu thang/bậc thềm đi lên/xuống trên mặt đất bắt buộc đỉnh ROI (xa) phải sâu hơn đáy ROI (gần) rõ rệt (>= 0.28m)
-        # và có phương sai độ sâu đủ lớn. Nếu mặt đứng của chiếc tủ có kệ ngang thì top_z ~ bot_z -> loại ngay!
+        # Lưu ý vật lý 3D quan trọng:
+        # - Khi đi XUỐNG cầu thang: cả khoảng cách ngang X và độ tụt sâu Y cùng tăng -> |top_z - bot_z| rất lớn (~1.4m).
+        # - Khi đi LÊN cầu thang: bậc càng lên cao thì càng gần tầm mắt camera đeo ngực (H_cam - Y giảm) bù trừ với X tăng,
+        #   nên khoảng cách xuyên tâm Z trên các bậc đi lên chênh lệch rất ít (|top_z - bot_z| chỉ ~0.05m - 0.25m),
+        #   NHƯNG mặt bậc (tối) và cổ bậc (sáng) tạo ra độ phân tầng độ sáng cực lớn (p90_p10 >= 42.0).
         top_z = float(np.median(roi_depth[:rh // 3, :]))
         bot_z = float(np.median(roi_depth[2 * rh // 3:, :]))
-        if (top_z - bot_z) < 0.28 or float(np.std(roi_depth)) < 0.18:
-            return None
+        std_z = float(np.std(roi_depth))
 
-        # 2. Lọc cạnh ngang thực tế
+        # 2. Lọc cạnh ngang thực tế (hỗ trợ cả bậc đá hoa cương tối màu ở cầu thang đi xuống lẫn bậc gạch sáng màu)
         gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
@@ -235,30 +237,42 @@ class GeometricHazardDetector:
         abs_x = cv2.convertScaleAbs(sobel_x)
         abs_y = cv2.convertScaleAbs(sobel_y)
 
-        # KIỂM TRA LƯỚI GẠCH MEN (Ceramic Tile Grid) & CÁNH TỦ DỌC:
-        # Nền gạch men có cả rãnh ngang lẫn rãnh dọc, hoặc chiếc tủ có 2 thanh trụ dọc 2 bên rất rõ.
-        # Cầu thang thật thì cạnh ngang (abs_y) áp đảo hoàn toàn cạnh dọc (abs_x).
-        horiz_px = int(np.count_nonzero((abs_y >= 45) & (abs_y > abs_x * 1.5)))
-        vert_px = int(np.count_nonzero((abs_x >= 45) & (abs_x > abs_y * 1.5)))
-        if horiz_px == 0 or vert_px > horiz_px * 0.50:
+        # Tính tỷ lệ cạnh ngang/dọc ở dải trung tâm bước chân (tránh bị nhiễu bởi song sắt dọc của tay vịn lan can ở rìa trái/phải)
+        rw = roi_bgr.shape[1]
+        cx_l, cx_r = int(rw * 0.18), int(rw * 0.82)
+        center_abs_x = abs_x[:, cx_l:cx_r]
+        center_abs_y = abs_y[:, cx_l:cx_r]
+        horiz_px = int(np.count_nonzero((center_abs_y >= 32) & (center_abs_y > center_abs_x * 1.4)))
+        vert_px = int(np.count_nonzero((center_abs_x >= 32) & (center_abs_x > center_abs_y * 1.4)))
+        if horiz_px == 0:
             return None
 
-        # Chỉ giữ lại các cạnh ngang thực sự sắc nét (abs_y >= 45) và mạnh hơn cạnh dọc rõ rệt
-        horiz_mask = ((abs_y >= 45) & (abs_y.astype(np.float32) >= abs_x.astype(np.float32) * 1.55)).astype(np.uint8) * 255
+        depth_column = np.median(roi_depth[:, cx_l:cx_r], axis=1)
+        gray_column = np.median(blurred[:, cx_l:cx_r], axis=1)
+        sy_column = np.median(center_abs_y, axis=1)
+        p90_p10 = float(np.percentile(gray_column, 90) - np.percentile(gray_column, 10))
+
+        # Nếu bề mặt phẳng lì theo phương đứng (|top_z - bot_z| < 0.22 và std_z < 0.18) VÀ không có phân tầng mặt bậc/cổ bậc (p90_p10 < 40.0)
+        # -> Chắc chắn là bức tường phẳng hoặc thân chiếc tủ có vệt kệ ngang, loại bỏ ngay!
+        if abs(top_z - bot_z) < 0.22 and std_z < 0.18 and p90_p10 < 40.0:
+            return None
+
+        # Giữ lại các cạnh ngang gờ bậc (abs_y >= 28 và trội hơn cạnh dọc tại điểm đó)
+        horiz_mask = ((abs_y >= 28) & (abs_y.astype(np.float32) >= abs_x.astype(np.float32) * 1.35)).astype(np.uint8) * 255
 
         # Nối liền các vết đứt nhỏ dọc theo gờ bậc
         kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 3))
         horizontal_edges = cv2.morphologyEx(horiz_mask, cv2.MORPH_CLOSE, kernel_close)
 
-        # 3. Dò các đoạn thẳng gờ bậc bằng HoughLinesP (chiều dài tối thiểu >= 32% chiều ngang ảnh)
-        min_line_len = int(w * 0.32)
+        # 3. Dò các đoạn thẳng gờ bậc bằng HoughLinesP (chiều dài tối thiểu >= 28% chiều ngang ảnh)
+        min_line_len = int(w * 0.28)
         lines = cv2.HoughLinesP(
             horizontal_edges,
             rho=1,
             theta=np.pi / 180,
-            threshold=42,
+            threshold=32,
             minLineLength=min_line_len,
-            maxLineGap=20,
+            maxLineGap=22,
         )
 
         valid_horizontal_lines = []
@@ -285,11 +299,11 @@ class GeometricHazardDetector:
         if not valid_horizontal_lines:
             return None
 
-        # Gom nhóm các cạnh ngang cách nhau <= 28px thành 1 bậc duy nhất
+        # Gom nhóm các cạnh ngang cách nhau <= 26px thành 1 bậc duy nhất
         valid_horizontal_lines.sort(key=lambda item: item["y_avg"])
         clusters: List[Dict[str, float]] = []
         for line in valid_horizontal_lines:
-            if not clusters or abs(line["y_avg"] - clusters[-1]["y_avg"]) > 28:
+            if not clusters or abs(line["y_avg"] - clusters[-1]["y_avg"]) > 26:
                 clusters.append({
                     "y_avg": line["y_avg"],
                     "x1": float(line["x1"]),
@@ -305,19 +319,12 @@ class GeometricHazardDetector:
 
         clustered_y = [c["y_avg"] for c in clusters]
         max_span_px = max((c["x2"] - c["x1"]) for c in clusters)
-        if max_span_px < w * 0.32:
+        if max_span_px < w * 0.28:
             return None
 
-        # 4. Kiểm tra bước nhảy độ sâu ĐỘT NGỘT (Step Discontinuity) vượt trên độ dốc tự nhiên của sàn phẳng!
-        # LỖI CŨ: Sàn gạch men phẳng nghiêng từ 0.8m (đáy) lên 2.8m (đỉnh) qua 300px có độ dốc tự nhiên ~0.0067m/px,
-        # nên khoảng cách 14px giữa trên và dưới đường ron gạch đã chênh ~0.09m >= 0.06m -> báo nhầm rãnh gạch là cầu thang!
-        # KHẮC PHỤC: Tính độ dốc nền trung bình (baseline_slope_per_px) và yêu cầu bước nhảy thực tế qua gờ bậc
-        # phải lớn hơn độ dốc nền ít nhất +0.14m (tổng bước nhảy >= 0.18m).
-        depth_column = np.median(roi_depth, axis=1)
-        gray_column = np.median(blurred, axis=1)
-
+        # 4. Phân tích kết hợp Bước nhảy độ sâu 3D (Step Discontinuity) VÀ Hồ sơ quang học bậc thang thực tế:
         dy_all = np.diff(depth_column)
-        baseline_slope_per_px = float(max(0.0, -np.median(dy_all)))  # Sàn phẳng: y tăng (xuống dưới) thì z giảm
+        baseline_slope_per_px = float(max(0.0, -np.median(dy_all)))
 
         depth_jumps = 0
         optical_jumps = 0
@@ -331,7 +338,6 @@ class GeometricHazardDetector:
                 z_lower = float(np.mean(depth_column[min(len(depth_column) - 1, y_idx + 2):min(len(depth_column), y_idx + 12)]))
                 cluster_depths.append(float(depth_column[y_idx]))
 
-                # Bậc thang/bậc thềm đi tới trước mặt: phía trên gờ (z_upper) phải XA HƠN phía dưới gờ (z_lower)
                 raw_jump = z_upper - z_lower
                 expected_smooth_drop = baseline_slope_per_px * 14.0
                 net_jump = raw_jump - expected_smooth_drop
@@ -341,27 +347,49 @@ class GeometricHazardDetector:
                     max_net_jump = max(max_net_jump, net_jump)
 
             if 6 <= y_idx < len(gray_column) - 6:
-                g_upper = float(np.mean(gray_column[max(0, y_idx - 10):max(1, y_idx - 2)]))
-                g_lower = float(np.mean(gray_column[min(len(gray_column) - 1, y_idx + 2):min(len(gray_column), y_idx + 10)]))
-                if abs(g_upper - g_lower) >= 14.0:
+                g_upper = float(np.mean(gray_column[max(0, y_idx - 12):max(1, y_idx - 3)]))
+                g_lower = float(np.mean(gray_column[min(len(gray_column) - 1, y_idx + 3):min(len(gray_column), y_idx + 12)]))
+                local_sy_peak = float(np.max(sy_column[max(0, y_idx - 4):min(len(sy_column), y_idx + 5)]))
+                if abs(g_upper - g_lower) >= 12.0 or (p90_p10 >= 22.0 and local_sy_peak >= 24.0):
                     optical_jumps += 1
 
-        # Kiểm tra tính đơn điệu của độ sâu các bậc: Bậc ở trên cao (xa hơn, index nhỏ) phải có độ sâu lớn hơn bậc ở dưới (gần hơn)
-        # Nếu là các thanh kệ của chiếc tủ (kệ trên thò ra, gầm tủ thụt vào hoặc phẳng đều) -> vi phạm tính đơn điệu bậc thang!
-        if len(cluster_depths) >= 2:
-            for i in range(len(cluster_depths) - 1):
-                if cluster_depths[i] < cluster_depths[i + 1] + 0.10:
-                    return None
-
-        is_stairs = (depth_jumps >= 1) and (max_net_jump >= 0.18) and (optical_jumps >= 1)
-        if not is_stairs:
-            return None
-
-        # 5. Xác định tọa độ & khoảng cách
         step_min_y = int(min(clustered_y))
         step_max_y = int(max(clustered_y))
         vertical_span = step_max_y - step_min_y
 
+        # Nhánh 1: Phát hiện theo Bước nhảy độ sâu 3D sắc nét (bậc thềm đơn lẻ, bậc tam cấp, cầu thang 3D rõ nét)
+        monotonic_3d = True
+        if len(cluster_depths) >= 2:
+            for i in range(len(cluster_depths) - 1):
+                if cluster_depths[i] < cluster_depths[i + 1] + 0.10:
+                    monotonic_3d = False
+                    break
+        has_3d_step_jumps = (
+            (depth_jumps >= 1)
+            and (max_net_jump >= 0.18)
+            and (optical_jumps >= 1)
+            and monotonic_3d
+            and (vert_px <= horiz_px * 0.50)
+            and ((top_z - bot_z) >= 0.28)
+        )
+
+        # Nhánh 2: Phát hiện Cầu thang nhiều bậc thực tế (cả đi xuống lẫn đi lên)
+        has_real_multistep_pattern = (
+            len(clustered_y) >= 3
+            and vertical_span >= 75
+            and p90_p10 >= 22.0
+            and optical_jumps >= 2
+            and (
+                std_z >= 0.20
+                or abs(top_z - bot_z) >= 0.22
+                or (p90_p10 >= 40.0 and vert_px <= horiz_px * 0.65)
+            )
+        )
+
+        if not (has_3d_step_jumps or has_real_multistep_pattern):
+            return None
+
+        # 5. Xác định tọa độ & khoảng cách
         bx1 = gx1 + int(min(c["x1"] for c in clusters))
         bx2 = gx1 + int(max(c["x2"] for c in clusters))
         by1 = gy1 + max(0, step_min_y - 20)
@@ -370,14 +398,15 @@ class GeometricHazardDetector:
         stair_depth_roi = roi_depth[max(0, step_min_y):min(roi_depth.shape[0], step_max_y + 12), :]
         stair_dist = round(float(np.median(stair_depth_roi)), 1) if stair_depth_roi.size > 0 else 1.5
 
+        # Khi đứng ngay đầu cầu thang đi xuống/đi lên thực tế (bậc dưới cùng nằm sát chân ảnh by2 >= 62% chiều cao ảnh),
+        # chuẩn hóa khoảng cách về <= 1.6m để cảnh báo tức thì dù Depth-Anything-V2 đo sâu xuống đáy cầu thang (3.2m - 4.2m)
+        if has_real_multistep_pattern and by2 >= int(h * 0.62) and stair_dist > 1.8:
+            stair_dist = 1.5
+
         if stair_dist > 3.2 or stair_dist < 0.35:
             return None
 
-        # Phân biệt chuẩn xác:
-        # - Cầu thang: Phải có từ 3 bậc trở lên, trải dài theo chiều dọc >= 85px và có >= 2 bước nhảy độ sâu thực sự
-        # - Bậc tam cấp: 2 bậc rõ rệt cách nhau >= 45px và có >= 2 bước nhảy độ sâu
-        # - Bậc thềm: 1 bậc có bước nhảy độ sâu sắc nét (>= 0.22m)
-        if len(clustered_y) >= 3 and vertical_span >= 85 and depth_jumps >= 2:
+        if len(clustered_y) >= 3 and vertical_span >= 75 and (depth_jumps >= 2 or has_real_multistep_pattern):
             name_vn = "cầu thang"
             class_name = "stairs"
         elif len(clustered_y) == 2 and vertical_span >= 45 and depth_jumps >= 2:
@@ -501,6 +530,174 @@ class GeometricHazardDetector:
             "is_danger": True,
             "hazard_type": "VERTICAL_PILLAR",
             "warning": f"Cảnh báo! Phía trước cách {dist_m} mét có cột nhà chắn lối."
+        }
+
+    def detect_generic_front_obstacle(
+        self,
+        dmap: Optional[np.ndarray],
+        known_boxes: Optional[List[Dict[str, int]]] = None,
+        frame_bgr: Optional[np.ndarray] = None,
+        max_dist_m: float = 1.50,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Phát hiện VẬT CẢN LẠ CHẮN NGANG PHÍA TRƯỚC (như tấm bạt căng ngang, rèm che, tấm ván, thùng lớn)
+        trong phạm vi `<= 1.50m` khi YOLO không có nhãn từ vựng và `detect_wall` bỏ qua do bề mặt
+        bạt/vải có nếp gấp nhăn (`|dZ/dy|` lớn hơn tường phẳng hoặc có hoa văn/màu sắc không đồng nhất).
+        Chống báo giả tuyệt đối khi đứng cách bức tường phẳng 1.5m - 2.0m (đủ 2 bước chân để đi tiếp):
+        Nếu bề mặt trải phẳng suốt cả 3 làn Trái-Giữa-Phải như bức tường và còn cách > 1.00m thì không báo vật cản!
+        """
+        if dmap is None or dmap.size == 0:
+            return None
+
+        h, w = dmap.shape[:2]
+        if h < 24 or w < 24:
+            return None
+
+        known_boxes = known_boxes or []
+        x1, x2 = int(w * 0.26), int(w * 0.74)
+        y1, y2 = int(h * 0.18), int(h * 0.78)
+        roi_depth = dmap[y1:y2, x1:x2]
+        if roi_depth.size == 0:
+            return None
+
+        rh, rw = roi_depth.shape[:2]
+        top_half = roi_depth[:max(1, rh // 2), :]
+        bot_half = roi_depth[max(1, rh // 2):, :]
+
+        top_med_z = float(np.median(top_half))
+        bot_med_z = float(np.median(bot_half))
+
+        # Nếu phần trên khung hình xa hơn phần dưới rất nhiều (top_med_z - bot_med_z > 1.20m)
+        # và phần trên thông thoáng (> 2.15m) -> Đây là mặt sàn mở bình thường, không phải tấm bạt/vật cản chắn ngang!
+        if (top_med_z - bot_med_z) > 1.20 and top_med_z > 2.15:
+            return None
+
+        # Tấm bạt căng ngang hoặc vật cản treo/đứng chắn lối đi sẽ làm cả nửa trên lẫn vùng giữa có độ sâu <= max_dist_m
+        close_mask = ((roi_depth >= 0.25) & (roi_depth <= max_dist_m)).astype(np.uint8)
+        close_ratio = float(np.mean(close_mask))
+        upper_close_ratio = float(np.mean((top_half >= 0.25) & (top_half <= max_dist_m + 0.08)))
+
+        if close_ratio < 0.35 or upper_close_ratio < 0.30:
+            return None
+
+        obs_z = float(np.median(roi_depth[close_mask > 0]))
+
+        # KIỂM TRA CHỐNG NHẦM BỨC TƯỜNG CÁCH 1.1m - 1.8m (ĐỦ 2 BƯỚC ĐI) THÀNH "VẬT CẢN":
+        # Nếu cả bên trái, ở giữa và bên phải đều có cùng độ sâu phẳng đồng nhất (chênh lệch < 0.25m, phương sai nhỏ < 0.05)
+        # thì đó là bức tường phẳng ở xa (> 1.00m), người dùng vẫn còn 2 bước chân để đi tiếp -> Không báo vật cản!
+        left_strip = dmap[y1:y2, :max(1, int(w * 0.22))]
+        right_strip = dmap[y1:y2, min(w - 1, int(w * 0.78)):]
+        if left_strip.size > 0 and right_strip.size > 0 and obs_z > 1.00:
+            l_z = float(np.median(left_strip))
+            r_z = float(np.median(right_strip))
+            if abs(l_z - obs_z) < 0.25 and abs(r_z - obs_z) < 0.25 and float(np.std(roi_depth)) < 0.05:
+                return None
+
+        ys, xs = np.where(close_mask > 0)
+        if ys.size < 20:
+            return None
+
+        bx1 = x1 + int(np.percentile(xs, 5))
+        bx2 = x1 + int(np.percentile(xs, 95))
+        by1 = y1 + int(np.percentile(ys, 5))
+        by2 = y1 + int(np.percentile(ys, 95))
+
+        if (bx2 - bx1) < int(w * 0.16) or (by2 - by1) < int(h * 0.16):
+            return None
+
+        if self._is_box_covered(bx1, by1, bx2, by2, known_boxes, thresh=0.25):
+            return None
+
+        dist_m = round(max(0.3, min(obs_z, max_dist_m)), 1)
+
+        return {
+            "class_name": "obstacle",
+            "class_name_vn": "vật cản",
+            "confidence": round(min(0.92, 0.68 + close_ratio * 0.25), 2),
+            "position": "center",
+            "distance_m": dist_m,
+            "bounding_box": {"x1": int(bx1), "y1": int(by1), "x2": int(bx2), "y2": int(by2)},
+            "in_roi": True,
+            "is_danger": True,
+            "hazard_type": "GENERIC_FRONT_OBSTACLE",
+            "warning": f"Cảnh báo! Phía trước cách {dist_m} mét có vật cản chắn lối."
+        }
+
+    def detect_ground_dropoff(
+        self,
+        dmap: Optional[np.ndarray],
+        known_boxes: Optional[List[Dict[str, int]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Phát hiện HỐ SÂU / SỤT LÚN / BẬC HỤT CHÂN (Ground Drop-off / Deep Pit) ngay dưới chân:
+        - Trên mặt phẳng đi bộ bình thường, khi quét từ giữa ảnh (y=50%) xuống sát chân (y=92%),
+          khoảng cách độ sâu Z giảm đều (gần người hơn).
+        - Nếu xuất hiện HỐ SÂU hoặc bậc hụt sâu dưới đất: tại ranh giới miệng hố, các hàng pixel
+          phía dưới (gần chân hơn trên ảnh) đột ngột vọt độ sâu Z TĂNG LÊN (sâu/xa hơn mép trên >= 0.52m),
+          hoặc tồn tại vùng lõm sâu bất thường (>= +0.65m so với mặt sàn hai bên).
+        """
+        if dmap is None or dmap.size == 0:
+            return None
+
+        h, w = dmap.shape[:2]
+        if h < 32 or w < 32:
+            return None
+
+        known_boxes = known_boxes or []
+        gx1, gx2 = int(w * 0.24), int(w * 0.76)
+        gy1, gy2 = int(h * 0.50), int(h * 0.92)
+        foot_roi = dmap[gy1:gy2, gx1:gx2]
+        if foot_roi.size == 0:
+            return None
+
+        rh, rw = foot_roi.shape[:2]
+        if rh < 16:
+            return None
+
+        # Mặt đất bình thường quanh mép trên vùng bước chân phải nằm trong tầm gần (0.5m - 2.3m)
+        upper_ground_z = float(np.median(foot_roi[:max(2, rh // 4), :]))
+        if upper_ground_z > 2.35 or upper_ground_z < 0.45:
+            return None
+
+        row_med_z = np.median(foot_roi, axis=1)
+        # Tìm bước nhảy độ sâu NGƯỢC CHIỀU (phía dưới ảnh lại sâu vọt hơn phía trên >= 0.52m)
+        max_drop_jump = 0.0
+        drop_row_idx = -1
+        for y_idx in range(4, rh - 4):
+            z_above = float(np.mean(row_med_z[max(0, y_idx - 4):y_idx]))
+            z_below = float(np.mean(row_med_z[y_idx + 1:min(rh, y_idx + 5)]))
+            drop_jump = z_below - z_above
+            if drop_jump > max_drop_jump and z_above <= 2.2:
+                max_drop_jump = drop_jump
+                drop_row_idx = y_idx
+
+        if max_drop_jump < 0.52 or drop_row_idx < 0:
+            return None
+
+        pit_mask = (foot_roi[drop_row_idx:, :] >= (upper_ground_z + 0.45)).astype(np.uint8)
+        pit_ratio = float(np.mean(pit_mask))
+        if pit_ratio < 0.25:
+            return None
+
+        bx1, bx2 = gx1 + int(rw * 0.10), gx1 + int(rw * 0.90)
+        by1 = gy1 + max(0, drop_row_idx - 4)
+        by2 = gy2
+
+        if self._is_box_covered(bx1, by1, bx2, by2, known_boxes, thresh=0.35):
+            return None
+
+        dist_m = round(max(0.5, min(upper_ground_z, 2.0)), 1)
+        return {
+            "class_name": "dropoff",
+            "class_name_vn": "hố sâu",
+            "confidence": round(min(0.94, 0.72 + min(0.20, max_drop_jump * 0.15)), 2),
+            "position": "center",
+            "distance_m": dist_m,
+            "bounding_box": {"x1": int(bx1), "y1": int(by1), "x2": int(bx2), "y2": int(by2)},
+            "in_roi": True,
+            "is_danger": True,
+            "hazard_type": "GROUND_DROPOFF",
+            "warning": f"Nguy hiểm! Chú ý dưới chân cách {dist_m} mét có hố sâu, hãy dừng lại."
         }
 
     @staticmethod

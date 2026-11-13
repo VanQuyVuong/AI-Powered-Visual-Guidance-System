@@ -16,15 +16,15 @@ Quy tắc đơn giản, dứt khoát theo yêu cầu người dùng:
 from typing import Optional
 
 # Khoảng cách nguy hiểm (m)
-WALL_DANGER_M = 1.30        # Bức tường lại gần <= 1.3m mới bắt đầu cảnh báo rẽ/quay đầu (tránh báo từ xa 2m)
+WALL_DANGER_M = 1.00        # Bức tường chỉ báo rẽ/quay đầu khi tiến sát <= 1.0m (còn cách 1.1m - 1.8m tức 2 bước chân vẫn cho đi tiếp)
 OBSTACLE_DANGER_M = 2.25    # Vật cản ở hành lang an toàn / làn giữa <= 2.25m (chặn triệt để báo nhầm ghế ở xa 3m - 5.5m)
 SIDE_OBSTACLE_M = 1.65      # Vật cản ở 2 bên <= 1.65m
 
 ALERT_REPEAT_INTERVAL_S = 6.0   # Nhắc lại sau 6s nếu vẫn đứng trước vật cản
-CLEAR_REPEAT_INTERVAL_S = 10.0  # Nhắc lại "an toàn, đi thẳng" sau 10s
+CLEAR_REPEAT_INTERVAL_S = 6.5   # Nhắc lại "an toàn, đi thẳng" định kỳ mỗi 6.5s khi đang đi thẳng
 
-STEP_WORDS = ("bậc thềm", "bậc tam cấp", "cầu thang", "bậc thang", "ổ gà", "hố sụt")
-GROUND_HAZARD_CLASSES = {"stairs", "step", "curb", "doorstep", "threshold", "pothole"}
+STEP_WORDS = ("bậc thềm", "bậc tam cấp", "cầu thang", "bậc thang", "ổ gà", "hố sụt", "hố sâu")
+GROUND_HAZARD_CLASSES = {"stairs", "step", "curb", "doorstep", "threshold", "pothole", "dropoff"}
 WALL_CLASSES = {"wall"}
 
 
@@ -38,6 +38,7 @@ def _initial_state() -> dict:
         "last_dist_m": 9.9,
         "clear_frames": 0,
         "blocked_frames": 0,
+        "pending_post_turn_reconfirm": False,
         "history": [],  # dùng bởi pipeline (chống rung tay)
     }
 
@@ -69,8 +70,8 @@ def assess_path(cur_text: str, all_objects: list, depth_lanes: Optional[dict], i
     """
     Đánh giá lối đi thời gian thực:
     Trả về:
-      - status: CLEAR | TURN_LEFT | TURN_RIGHT | TURN_AROUND | STEPS
-      - name: tên vật cản (vật cản, bức tường, cột,...)
+      - status: CLEAR | ALLEY_CLEAR | ALLEY_DRIFT_LEFT | ALLEY_DRIFT_RIGHT | TURN_LEFT | TURN_RIGHT | TURN_AROUND | STEPS
+      - name: tên vật cản (vật cản, bức tường, cột, hố sâu,...)
       - min_dist: khoảng cách vật cản gần nhất (m)
     """
     lower = (cur_text or "").lower()
@@ -104,25 +105,36 @@ def assess_path(cur_text: str, all_objects: list, depth_lanes: Optional[dict], i
         if d > OBSTACLE_DANGER_M:
             return False
 
-        # 1. Hộp bao xâm lấn vào làn giữa (x1 < 0.65*W và x2 > 0.35*W)
+        pos = _get(o, "position")
         b = _box(o)
-        if b is not None:
-            bx1, bx2 = b
-            if bx1 < 0.65 * W and bx2 > 0.35 * W:
-                return True
 
-        # 2. Lọt vào hình thang hành lang an toàn 3D (ROI)
-        if _get(o, "in_roi") is True:
+        # 1. Nếu vật thể đã nằm lệch sang làn trái hoặc làn phải (tâm ở 1/3 trái hoặc 1/3 phải khung hình):
+        # chỉ coi là chắn ngang lối đi thẳng nếu hộp bao tràn sâu qua trục giữa (x1 < 0.58*W và x2 > 0.42*W).
+        # Nhờ đó, ngay khi người dùng vừa rẽ phải/trái làm vật cản dạt sang bên (dù in_roi ở đáy hình thang vẫn True),
+        # làn giữa lập tức được giải phóng để báo "Phía trước an toàn, đi thẳng."!
+        if pos in ("left", "right"):
+            if b is not None:
+                bx1, bx2 = b
+                return (bx1 < 0.58 * W) and (bx2 > 0.42 * W)
+            return False
+
+        # 2. Vị trí ở làn giữa (center)
+        if pos == "center":
             return True
 
-        # 3. Vị trí ở làn giữa
-        if _get(o, "position") == "center":
+        # 3. Dự phòng khi object không có trường position: kiểm tra hộp bao hoặc in_roi
+        if b is not None:
+            bx1, bx2 = b
+            if bx1 < 0.62 * W and bx2 > 0.38 * W:
+                return True
+
+        if _get(o, "in_roi") is True:
             return True
 
         return False
 
-    # 1. BẬC THỀM / CẦU THANG / Ổ GÀ DƯỚI CHÂN (Kiểm tra trực tiếp cả trong all_objects lẫn cur_text
-    # để không bao giờ bị vật cản 2 bên che khuất cảnh báo cầu thang!)
+    # 1. BẬC THỀM / CẦU THANG / Ổ GÀ / HỐ SÂU DƯỚI CHÂN (Kiểm tra trực tiếp cả trong all_objects lẫn cur_text
+    # để không bao giờ bị vật cản 2 bên che khuất cảnh báo dưới chân!)
     step_objs = [
         o for o in objs
         if str(_get(o, "class_name", "")).lower() in GROUND_HAZARD_CLASSES and dist(o) <= 2.40
@@ -131,10 +143,14 @@ def assess_path(cur_text: str, all_objects: list, depth_lanes: Optional[dict], i
     if is_steps:
         if step_objs:
             nearest_step = min(step_objs, key=dist)
+            raw_cls = str(_get(nearest_step, "class_name", "")).lower()
             step_name = _get(nearest_step, "class_name_vn") or (
-                "cầu thang" if str(_get(nearest_step, "class_name", "")).lower() == "stairs" else "bậc thềm"
+                "hố sâu" if raw_cls == "dropoff" else ("cầu thang" if raw_cls == "stairs" else "bậc thềm")
             )
             step_d = dist(nearest_step)
+        elif "hố sâu" in lower:
+            step_name = "hố sâu"
+            step_d = 1.4
         elif "ổ gà" in lower or "hố sụt" in lower:
             step_name = "ổ gà"
             step_d = 1.5
@@ -146,25 +162,56 @@ def assess_path(cur_text: str, all_objects: list, depth_lanes: Optional[dict], i
             step_d = 1.5
         return {"status": "STEPS", "name": step_name, "min_dist": step_d}
 
-    # 2. KIỂM TRA BỨC TƯỜNG (Chỉ nguy hiểm khi tiến sát <= WALL_DANGER_M)
+    # 2. KIỂM TRA BỨC TƯỜNG CHẮN TRƯỚC MẶT (Chỉ nguy hiểm khi tường ở trung tâm tiến sát <= WALL_DANGER_M)
     wall_objs = [
         o for o in objs
-        if str(_get(o, "class_name", "")).lower() in WALL_CLASSES and dist(o) <= WALL_DANGER_M
+        if str(_get(o, "class_name", "")).lower() in WALL_CLASSES
+        and _get(o, "position", "center") == "center"
+        and dist(o) <= WALL_DANGER_M
     ]
     is_wall_near = bool(wall_objs) or (("bức tường" in lower) and (c_med <= WALL_DANGER_M))
 
     # 3. VẬT CẢN TRUNG TÂM / VÙNG HÀNH LANG AN TOÀN (CENTER / PATH)
     center_objs = [o for o in objs if is_in_path(o)]
 
-    # Nếu chỉ có các vật thể ở rất xa (> 2.25m, ví dụ ghế cách 5.5m) và trung vị độ sâu làn giữa > 1.25m
+    # Nếu chỉ có các vật thể ở rất xa (> 2.25m, ví dụ ghế cách 5.5m) hoặc tường còn cách > 1.0m (đủ 2 bước chân)
     # thì không bao giờ coi là đường bị chắn
     has_only_far_center_objs = bool(objs) and not center_objs and all(dist(o) > OBSTACLE_DANGER_M for o in objs)
-    depth_strictly_blocked = c_blk and (c_med <= 1.25 if has_only_far_center_objs else c_med <= 1.40)
+    depth_strictly_blocked = c_blk and (c_med <= 0.95 if has_only_far_center_objs else c_med <= 1.00)
 
     center_blocked = is_wall_near or bool(center_objs) or depth_strictly_blocked
 
-    # 4. NẾU LÀN GIỮA THÔNG THOÁNG -> ĐI THẲNG AN TOÀN
+    # 4. NẾU LÀN GIỮA THÔNG THOÁNG -> KIỂM TRA CHẾ ĐỘ ĐI TRONG HẺM (ALLEY MODE) HOẶC ĐI THẲNG AN TOÀN
     if not center_blocked:
+        # Kiểm tra xem hai bên có phải là 2 bức tường hẹp của con hẻm / hành lang tường không
+        side_non_wall_objs = [
+            o for o in objs
+            if _get(o, "position") in ("left", "right")
+            and str(_get(o, "class_name", "")).lower() not in WALL_CLASSES
+            and dist(o) <= SIDE_OBSTACLE_M
+        ]
+        left_wall_obj = any(
+            str(_get(o, "class_name", "")).lower() in WALL_CLASSES and _get(o, "position") == "left" and dist(o) <= 1.65
+            for o in objs
+        )
+        right_wall_obj = any(
+            str(_get(o, "class_name", "")).lower() in WALL_CLASSES and _get(o, "position") == "right" and dist(o) <= 1.65
+            for o in objs
+        )
+        is_alley_walls = (
+            (not side_non_wall_objs)
+            and (
+                (has_depth and l_med <= 1.45 and r_med <= 1.45 and c_med >= 1.95)
+                or (left_wall_obj and right_wall_obj)
+            )
+        )
+        if is_alley_walls:
+            if has_depth and l_med <= 0.72 and r_med > 0.80:
+                return {"status": "ALLEY_DRIFT_LEFT", "name": "tường bên trái", "min_dist": l_med}
+            if has_depth and r_med <= 0.72 and l_med > 0.80:
+                return {"status": "ALLEY_DRIFT_RIGHT", "name": "tường bên phải", "min_dist": r_med}
+            return {"status": "ALLEY_CLEAR", "name": "tường dài hai bên", "min_dist": c_med}
+
         return {"status": "CLEAR", "name": "an toàn", "min_dist": 9.9}
 
     # 5. XÁC ĐỊNH TÊN VẬT CẢN CHẮN TRƯỚC MẶT (ƯU TIÊN TÊN VẬT THỂ CỤ THỂ)
@@ -257,20 +304,31 @@ def update_spatial_scan_and_voice(
     name = a["name"]
     min_dist = float(a.get("min_dist", 9.9))
 
-    st["clear_frames"] = st["clear_frames"] + 1 if status == "CLEAR" else 0
-    st["blocked_frames"] = st["blocked_frames"] + 1 if status != "CLEAR" else 0
+    is_clear_like = status in ("CLEAR", "ALLEY_CLEAR")
+    st["clear_frames"] = st["clear_frames"] + 1 if is_clear_like else 0
+    st["blocked_frames"] = st["blocked_frames"] + 1 if not is_clear_like else 0
 
     since = (now - st["last_time"]) if st["last_time"] > 0 else float("inf")
     last_sig = st["last_alert_sig"]
     last_dist = float(st.get("last_dist_m", 9.9))
+
+    # Nếu trước đó hệ thống vừa yêu cầu rẽ trái / rẽ phải / quay đầu (TURN_*) và người dùng đã rẽ xong
+    # khiến phía trước thông thoáng, ưu tiên xác nhận "Phía trước an toàn, đi thẳng." trước tiên!
+    was_turning_or_blocked = bool(last_sig and last_sig not in ("CLEAR", "ALLEY_CLEAR"))
+    if status == "ALLEY_CLEAR" and last_sig.startswith("TURN_"):
+        status = "CLEAR"
 
     target_text = ""
     target_prio = "HIGH"
     sig = f"{status}:{name}"
 
     if status == "STEPS":
-        target_text = f"Chú ý dưới chân, có {name}, hãy bước chậm."
-        target_prio = "HIGH"
+        if name == "hố sâu":
+            target_text = "Chú ý dưới chân, có hố sâu, hãy dừng lại."
+            target_prio = "CRITICAL"
+        else:
+            target_text = f"Chú ý dưới chân, có {name}, hãy bước chậm."
+            target_prio = "HIGH"
     elif status == "TURN_AROUND":
         target_text = f"Phía trước có {name}, cả hai bên đều vướng, hãy quay đầu."
         target_prio = "CRITICAL"
@@ -280,22 +338,35 @@ def update_spatial_scan_and_voice(
     elif status == "TURN_RIGHT":
         target_text = f"Phía trước có {name}, hãy rẽ sang phải."
         target_prio = "HIGH"
+    elif status == "ALLEY_DRIFT_LEFT":
+        target_text = "Đang đi sát tường bên trái, hãy chỉnh nhẹ sang phải rồi đi thẳng."
+        target_prio = "HIGH"
+        sig = "ALLEY_DRIFT_LEFT"
+    elif status == "ALLEY_DRIFT_RIGHT":
+        target_text = "Đang đi sát tường bên phải, hãy chỉnh nhẹ sang trái rồi đi thẳng."
+        target_prio = "HIGH"
+        sig = "ALLEY_DRIFT_RIGHT"
+    elif status == "ALLEY_CLEAR":
+        target_text = "Hai bên là bức tường dài, phía trước thông thoáng, bạn hãy đi thẳng."
+        target_prio = "LOW"
+        sig = "ALLEY_CLEAR"
     else:  # CLEAR
         target_text = "Phía trước an toàn, đi thẳng."
         target_prio = "LOW"
         sig = "CLEAR"
 
     should_speak = False
-    is_fresh_from_clear = (last_sig == "CLEAR" or not last_sig)
+    is_fresh_from_clear = (last_sig in ("CLEAR", "ALLEY_CLEAR") or not last_sig)
 
     if status == "STEPS":
-        # Nếu vừa ở trạng thái CLEAR (an toàn) mà bước tới cầu thang/bậc thềm -> Ngắt và cảnh báo NGAY LẬP TỨC (0.0s)!
+        # Nếu vừa ở trạng thái CLEAR/ALLEY_CLEAR mà bước tới cầu thang/hố sâu -> Ngắt và cảnh báo NGAY LẬP TỨC (0.0s)!
         min_step_interval = 0.0 if is_fresh_from_clear else 1.2
         if (last_sig != sig and since >= min_step_interval) or since >= ALERT_REPEAT_INTERVAL_S:
             should_speak = True
-    elif status in ("TURN_LEFT", "TURN_RIGHT", "TURN_AROUND"):
-        # 1. Nếu chuyển từ CLEAR (đang đi thẳng an toàn) sang có vật cản nguy hiểm -> Cảnh báo TỨC THÌ (0.0s, frame 1)!
-        # 2. Nếu người dùng vẫn tiếp tục tiến sát vào vật cản đó đến mức nguy kịch (<= 0.85m, giảm >= 0.5m so với lúc báo trước)
+            st["pending_post_turn_reconfirm"] = False
+    elif status in ("TURN_LEFT", "TURN_RIGHT", "TURN_AROUND", "ALLEY_DRIFT_LEFT", "ALLEY_DRIFT_RIGHT"):
+        # 1. Nếu chuyển từ CLEAR / ALLEY_CLEAR sang có vật cản nguy hiểm hoặc lệch sát tường hẻm -> Cảnh báo TỨC THÌ (0.0s, frame 1)!
+        # 2. Nếu người dùng vẫn tiếp tục tiến sát vào vật cản đó đến mức nguy kịch (<= 0.85m, giảm >= 0.45m so với lúc báo trước)
         #    -> Nhắc khẩn cấp sau 1.8s mà không cần chờ hết 6.0s!
         min_frames = 1 if is_fresh_from_clear else 2
         min_interval = 0.0 if is_fresh_from_clear else 1.2
@@ -307,10 +378,29 @@ def update_spatial_scan_and_voice(
             or since >= ALERT_REPEAT_INTERVAL_S
         ):
             should_speak = True
-    else:  # CLEAR
-        # Giữ hướng an toàn >= 2 frame và sau khoảng nghỉ hợp lý
-        if st["clear_frames"] >= 2 and since >= 1.5 and (last_sig != "CLEAR" or since >= CLEAR_REPEAT_INTERVAL_S):
+            st["pending_post_turn_reconfirm"] = False
+    elif status == "ALLEY_CLEAR":
+        # Chế độ đi trong hẻm: Khi bắt đầu bước vào hẻm (last_sig != "ALLEY_CLEAR"), thông báo đúng 1 lần:
+        # "Hai bên là bức tường dài, phía trước thông thoáng, bạn hãy đi thẳng."
+        # Sau đó GIỮ IM LẶNG HOÀN TOÀN trong suốt quá trình đi thẳng trong hẻm, chỉ ngắt 0ms khi có vật cản phía trước!
+        if last_sig != "ALLEY_CLEAR" and since >= (0.0 if not last_sig else 0.8):
             should_speak = True
+            st["pending_post_turn_reconfirm"] = False
+    else:  # CLEAR
+        # Nếu vừa rẽ trái/phải qua vật cản (was_turning_or_blocked): chỉ cần giữ hướng trống >= 2 frame và >= 0.75s
+        # là báo ngay "Phía trước an toàn, đi thẳng." để người khiếm thị yên tâm bước tiếp!
+        min_clear_interval = 0.75 if was_turning_or_blocked else 1.5
+        if st["clear_frames"] >= 2 and since >= min_clear_interval and (last_sig != "CLEAR" or since >= CLEAR_REPEAT_INTERVAL_S):
+            should_speak = True
+            st["pending_post_turn_reconfirm"] = was_turning_or_blocked
+        elif st["clear_frames"] >= 2 and st.get("pending_post_turn_reconfirm") and since >= 2.4:
+            # Phát bù xác nhận an toàn sau 2.4s nếu lần phát đầu tiên ở 0.75s diễn ra lúc loa điện thoại đang đọc dở câu bảo rẽ
+            should_speak = True
+            st["pending_post_turn_reconfirm"] = False
+
+    st["current_status"] = status
+    st["current_sig"] = sig
+    st["last_spoken_flag"] = should_speak
 
     if should_speak:
         st["last_text"] = target_text
@@ -321,3 +411,36 @@ def update_spatial_scan_and_voice(
         return target_text, target_prio, True
 
     return (st["last_text"] or target_text), st["last_priority"] if st["last_text"] else target_prio, False
+
+
+def get_decision_telemetry(now: Optional[float] = None) -> dict:
+    """
+    Trích xuất thông tin máy trạng thái quyết định (Guided Scan State Machine)
+    và trạng thái điều tiết giọng nói (Voice Throttle / Queue) phục vụ hiển thị trực quan trên Dashboard.
+    """
+    st = voice_state
+    status = st.get("current_status") or "CLEAR"
+    last_time = float(st.get("last_time", 0.0) or 0.0)
+    since_s = round(max(0.0, (now - last_time)), 1) if (now and last_time > 0) else 0.0
+
+    state_labels = {
+        "CLEAR": "ĐI THẲNG AN TOÀN (CLEAR)",
+        "ALLEY_CLEAR": "CHẾ ĐỘ ĐI HẺM TĨNH LẶNG (ALLEY_CLEAR)",
+        "ALLEY_DRIFT_LEFT": "CHỈNH LỆCH TƯỜNG TRÁI (ALLEY_DRIFT_LEFT)",
+        "ALLEY_DRIFT_RIGHT": "CHỈNH LỆCH TƯỜNG PHẢI (ALLEY_DRIFT_RIGHT)",
+        "TURN_LEFT": "CHỈ HƯỚNG RẼ TRÁI (TURN_LEFT)",
+        "TURN_RIGHT": "CHỈ HƯỚNG RẼ PHẢI (TURN_RIGHT)",
+        "TURN_AROUND": "NGÕ CỤT - QUAY ĐẦU (TURN_AROUND)",
+        "STEPS": "CẢNH BÁO DƯỚI CHÂN P0 (STEPS / DROPOFF)",
+    }
+
+    return {
+        "state_code": status,
+        "state_label": state_labels.get(status, status),
+        "clear_frames": int(st.get("clear_frames", 0)),
+        "blocked_frames": int(st.get("blocked_frames", 0)),
+        "since_last_speech_s": since_s,
+        "last_speech_ts": round(last_time, 3),
+        "spoken_this_frame": bool(st.get("last_spoken_flag", False)),
+        "voice_engine": "Blaze AI TTS + Android Native QUEUE_ADD",
+    }

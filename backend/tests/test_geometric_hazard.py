@@ -438,6 +438,135 @@ def test_blind_user_worst_case_safety_interrupts_and_dark_room(detector):
     assert detector.detect_wall(None, known_boxes=[], frame_bgr=dark_frame) is None
 
 
+def test_fusion_engine_model_branch_breakdown_and_sam_masks():
+    from app.vision.fusion_engine import MultiModelFusionEngine
+
+    engine = MultiModelFusionEngine()
+    yolo_objs = [
+        {
+            "track_id": 1,
+            "class_name": "chair",
+            "vi_name": "ghế",
+            "confidence": 0.91,
+            "bbox": [240, 180, 400, 420],
+            "distance_m": 1.6,
+            "risk_level": "HIGH",
+            "sam_mask_refined": True,
+        }
+    ]
+    structural_hazards = [
+        {
+            "class_name": "staircase",
+            "vi_name": "cầu thang",
+            "confidence": 0.85,
+            "bbox": [480, 220, 620, 440],
+            "distance_m": 1.8,
+            "risk_level": "HIGH",
+            "source_model": "SegFormer+Geo3D",
+        }
+    ]
+    sam_obstacles = [
+        {
+            "class_name": "obstacle",
+            "vi_name": "vật cản lạ",
+            "confidence": 0.72,
+            "bbox": [20, 200, 120, 380],
+            "distance_m": 2.4,
+            "risk_level": "MEDIUM",
+            "source_model": "EdgeSAM",
+        }
+    ]
+    depth_lanes = {
+        "lanes": {
+            "left": {"median_m": 2.4},
+            "center": {"median_m": 1.6},
+            "right": {"median_m": 1.8},
+        }
+    }
+
+    res = engine.fuse_detections(
+        yolo_objs,
+        structural_hazards,
+        sam_obstacles,
+        depth_lanes,
+        640,
+        480,
+        now=500.0,
+        sam_mask_count=4,
+    )
+    summary = res["fusion_summary"]
+    branches = summary["model_branches"]
+
+    assert {"yolo11", "depth_v2", "edgesam", "segformer_geo"}.issubset(branches.keys())
+    assert branches["yolo11"]["count"] == 1
+    assert branches["depth_v2"]["has_depth"] is True
+    assert branches["depth_v2"]["center_m"] == 1.6
+    assert branches["edgesam"]["active_masks"] == 4
+    assert branches["edgesam"]["refined_boxes"] == 1
+    assert branches["segformer_geo"]["count"] == 1
+    assert summary["danger_obstacle_count"] >= 1
+    assert summary["ema_active_tracks"] >= 1
+    assert "dedup_removed_count" in summary
+
+
+def test_decision_telemetry_and_navigation_sync():
+    from app.vision.guided_scan import get_decision_telemetry, voice_state
+    from app.vision.pipeline import _sync_navigation_with_decision
+
+    snapshot = dict(voice_state)
+    try:
+        voice_state["current_status"] = "CLEAR"
+        voice_state["clear_frames"] = 5
+        voice_state["blocked_frames"] = 0
+        voice_state["last_time"] = 123.4567
+        voice_state["last_spoken_flag"] = True
+
+        dt = get_decision_telemetry(now=125.4567)
+        assert dt["state_code"] == "CLEAR"
+        assert "CLEAR" in dt["state_label"]
+        assert dt["clear_frames"] == 5
+        assert dt["blocked_frames"] == 0
+        assert dt["since_last_speech_s"] == 2.0
+        assert dt["last_speech_ts"] == 123.457
+        assert dt["spoken_this_frame"] is True
+        assert "Blaze AI" in dt["voice_engine"]
+
+        nav = {
+            "direction": "right",
+            "text": "Rẽ phải",
+            "description": "Bên trái có vật cản, rẽ phải.",
+        }
+        synced = _sync_navigation_with_decision(nav, dt, "Phía trước an toàn, đi thẳng.")
+        assert synced["direction"] == "straight"
+        assert synced["text"] == "Đi thẳng"
+        assert synced["description"] == "Phía trước an toàn, đi thẳng."
+
+        synced_left = _sync_navigation_with_decision(dict(nav), {"state_code": "TURN_LEFT"}, "Rẽ trái tránh vật cản.")
+        assert synced_left["direction"] == "left"
+        assert synced_left["text"] == "Rẽ trái"
+
+        synced_steps = _sync_navigation_with_decision(dict(nav), {"state_code": "STEPS"}, "Chú ý bậc cầu thang!")
+        assert synced_steps["direction"] == "stop"
+    finally:
+        voice_state.clear()
+        voice_state.update(snapshot)
+
+
+def test_view_phone_stream_contains_fusion_hud_and_trace_log():
+    from pathlib import Path
+
+    html_path = Path(__file__).resolve().parents[1] / "view_phone_stream.html"
+    content = html_path.read_text(encoding="utf-8")
+    for token in (
+        "fusionEngineSection",
+        "fusionTraceList",
+        "renderFusionEngineHud",
+        "appendFusionTraceLog",
+    ):
+        assert token in content
+
+
+
 
 
 

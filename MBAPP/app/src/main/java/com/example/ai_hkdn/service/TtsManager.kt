@@ -90,17 +90,26 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
         if (!isInitialized || text.isBlank()) return
 
         val now = System.currentTimeMillis()
-        val isSafeMessage = text.contains("an toàn", ignoreCase = true)
-        val wasSafeMessage = lastSpokenText.contains("an toàn", ignoreCase = true)
+        val isSafeMessage = text.contains("an toàn", ignoreCase = true) ||
+            text.contains("thông thoáng", ignoreCase = true)
+        val wasSafeMessage = lastSpokenText.contains("an toàn", ignoreCase = true) ||
+            lastSpokenText.contains("thông thoáng", ignoreCase = true)
+        val isTransitionToSafe = isSafeMessage && !wasSafeMessage && lastSpokenText.isNotBlank()
         val isDanger = priority.equals("CRITICAL", ignoreCase = true) ||
             priority.equals("DANGER", ignoreCase = true) ||
             priority.equals("HIGH", ignoreCase = true) || !isSafeMessage
 
-        // 1. Nếu là thông báo "Phía trước an toàn": chỉ nhắc lại tối đa mỗi 8 giây và không bao giờ ngắt lời cảnh báo vật cản
+        // 1. Xử lý thông báo "Phía trước an toàn, đi thẳng":
+        // - Nếu VỪA RẼ TRÁI/PHẢI XONG (chuyển từ cảnh báo vật cản sang an toàn - isTransitionToSafe):
+        //   KHÔNG BAO GIỜ bỏ qua! Cho phép xếp hàng (QUEUE_ADD) ngay sau câu nhắc rẽ để đọc nối tiếp "Phía trước an toàn, đi thẳng."!
+        // - Nếu đang đi thẳng bình thường (wasSafeMessage == true): chỉ nhắc lại tối đa mỗi 6 giây.
         if (!force && isSafeMessage) {
-            if (tts?.isSpeaking == true) return
-            if (wasSafeMessage && (now - lastSpokenTime) < 8000) return
-            if (!wasSafeMessage && (now - lastSpokenTime) < 3500) return
+            if (isTransitionToSafe) {
+                if ((now - lastSpokenTime) < 500) return
+            } else {
+                if (tts?.isSpeaking == true) return
+                if (wasSafeMessage && (now - lastSpokenTime) < 6000) return
+            }
         }
 
         // 2. Chống lặp lại cùng một câu cảnh báo vật cản trong 2.5 giây
@@ -111,7 +120,7 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
         // 3. Nếu đang đọc câu "an toàn" hoặc lời chào mà phát hiện vật cản (ghế, chai, bàn, tường...) -> NGẮT NGAY để đọc vật cản!
         val shouldFlushImmediately = force || (isDanger && (wasSafeMessage || text != lastSpokenText))
 
-        if (!shouldFlushImmediately && tts?.isSpeaking == true && (now - lastSpokenTime) < 1800) {
+        if (!shouldFlushImmediately && !isTransitionToSafe && tts?.isSpeaking == true && (now - lastSpokenTime) < 1800) {
             return
         }
 

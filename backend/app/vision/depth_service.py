@@ -85,9 +85,23 @@ class DepthService:
         self._latest_potholes: List[Dict[str, Any]] = []
         self._last_computed_time: float = 0.0
         self._is_busy = False
+        self._cycle_count: int = 0
 
         # Khởi động nạp model trong luồng riêng để server bật tức thì
         threading.Thread(target=self._load_model, daemon=True).start()
+
+    def _should_run_auxiliary_models(self, cycle_idx: int) -> tuple[bool, bool]:
+        """
+        Điều phối nhịp chạy xen kẽ (Interleaved Multi-Model Scheduling):
+        - Depth Anything V2 luôn chạy ở MỌI chu kỳ (100%) vì khoảng cách 3D thay đổi theo từng bước chân.
+        - SegFormer chạy ở chu kỳ đầu tiên (khi chưa có `_latest_seg_map`) và mỗi 2 chu kỳ một lần (`cycle_idx % 2 == 0`),
+          vì cấu trúc tường/cửa/cột nhà không biến đổi đột ngột từng mili-giây.
+        - Pothole YOLO chạy ở chu kỳ đầu tiên và mỗi 3 chu kỳ một lần (`cycle_idx % 3 == 0`).
+        Giúp tốc độ cập nhật bản đồ độ sâu 3D tăng gấp ~3 lần mà cả 4 mô hình vẫn hoạt động song song.
+        """
+        run_seg = (self._latest_seg_map is None) or (cycle_idx % 2 == 0)
+        run_pothole = (cycle_idx == 1) or (cycle_idx % 3 == 0)
+        return run_seg, run_pothole
 
     def _load_model(self):
         t0 = time.time()
@@ -144,18 +158,26 @@ class DepthService:
     def compute_depth_map(self, frame_bgr: np.ndarray) -> Optional[np.ndarray]:
         """
         Tính toán bản đồ độ sâu (depth map) theo mét VÀ bản đồ phân đoạn bề mặt (SegFormer)
-        cho ảnh BGR đầu vào.
+        theo nhịp xen kẽ thông minh cho ảnh BGR đầu vào.
         """
         if not self.is_loaded or self.model is None:
             return None
 
         try:
+            self._cycle_count += 1
+            cycle_idx = self._cycle_count
+            run_seg, run_pothole = self._should_run_auxiliary_models(cycle_idx)
+
             h, w = frame_bgr.shape[:2]
-            small_rgb = cv2.cvtColor(cv2.resize(frame_bgr, (256, 192)), cv2.COLOR_BGR2RGB)
+            small_rgb = cv2.cvtColor(cv2.resize(frame_bgr, (224, 168), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
             pil_img = Image.fromarray(small_rgb)
 
-            # 1. Tính Metric Depth Map
-            inputs = self.processor(images=pil_img, return_tensors="pt").to(self.device)
+            # 1. Tính Metric Depth Map ở mọi chu kỳ (ép size 252x252 là bội số của patch 14 để tránh processor phóng ngược lên 518x518)
+            inputs = self.processor(
+                images=pil_img,
+                size={"height": 252, "width": 252},
+                return_tensors="pt",
+            ).to(self.device)
             with torch.no_grad():
                 out = self.model(**inputs).predicted_depth
 
@@ -168,11 +190,15 @@ class DepthService:
 
             depth_map = np.clip(depth_map, 0.2, 15.0)
 
-            # 2. Tính Semantic Segmentation Map (nhận diện bức tường, cửa, cầu thang, bàn ghế)
+            # 2. Tính Semantic Segmentation Map (ép size 256x256 để giảm 4 lần RAM và tăng tốc 4 lần)
             seg_map_resized = None
-            if self.seg_loaded and self.seg_model is not None and self.seg_processor is not None:
+            if run_seg and self.seg_loaded and self.seg_model is not None and self.seg_processor is not None:
                 try:
-                    s_inputs = self.seg_processor(images=pil_img, return_tensors="pt").to(self.device)
+                    s_inputs = self.seg_processor(
+                        images=pil_img,
+                        size={"height": 256, "width": 256},
+                        return_tensors="pt",
+                    ).to(self.device)
                     with torch.no_grad():
                         s_logits = self.seg_model(**s_inputs).logits
                     seg_ids = s_logits.argmax(dim=1).squeeze(0).cpu().numpy().astype(np.int32)
@@ -180,11 +206,12 @@ class DepthService:
                 except Exception as se:
                     print(f"[DepthService] Lỗi SegFormer: {se}")
 
-            # 3. Chạy phát hiện ổ gà (Pothole)
-            pothole_list = []
-            if self.pothole_model is not None:
+            # 3. Chạy phát hiện ổ gà (Pothole) theo nhịp xen kẽ
+            pothole_list = None
+            if run_pothole and self.pothole_model is not None:
+                pothole_list = []
                 try:
-                    p_res = self.pothole_model(frame_bgr, verbose=False, conf=0.35, imgsz=320)
+                    p_res = self.pothole_model(frame_bgr, verbose=False, conf=0.35, imgsz=288)
                     for r in p_res:
                         for box in r.boxes:
                             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
@@ -206,7 +233,8 @@ class DepthService:
                 self._latest_depth_map = depth_map
                 if seg_map_resized is not None:
                     self._latest_seg_map = seg_map_resized
-                self._latest_potholes = pothole_list
+                if pothole_list is not None:
+                    self._latest_potholes = pothole_list
                 self._last_computed_time = time.time()
 
             return depth_map
@@ -216,19 +244,17 @@ class DepthService:
 
     def trigger_async_compute(self, frame_bgr: np.ndarray):
         """
-        Kích hoạt tính depth + segmentation:
-        - Nếu chưa có depth map nào trong bộ đệm (frame đầu tiên), tính đồng bộ ngay lập tức
-          để có khoảng cách mét và nhận diện tường ngay từ frame 1!
-        - Các frame tiếp theo chạy trong background thread để không làm giảm FPS.
+        Kích hoạt tính depth + segmentation hoàn toàn bất đồng bộ trong background thread
+        (trừ khi chưa có bản đồ độ sâu đầu tiên). Nhờ `_should_run_auxiliary_models` và kích thước `224x168`,
+        luồng cập nhật độ sâu nhanh gấp ~3 lần.
         """
         if not self.is_loaded:
             return
 
         with self._lock:
             has_first_map = self._latest_depth_map is not None
-            is_stale = (time.time() - self._last_computed_time) > 5.0
 
-        if not has_first_map or is_stale:
+        if not has_first_map:
             if not self._is_busy:
                 self._is_busy = True
                 try:
@@ -352,11 +378,9 @@ class DepthService:
     ) -> List[Dict[str, Any]]:
         """
         HỢP NHẤT ĐA MÔ HÌNH (YOLO + DEPTH ANYTHING V2 + SEGFORMER + GEOMETRIC + POTHOLE):
-        1. Bổ khuyết các vật thể/cấu trúc mà SegFormer nhìn thấy rõ (bức tường, cầu thang,
-           cửa ra vào, bàn, ghế, tủ, cột nhà) nằm trong khoảng cách gần nhưng YOLO bỏ sót.
-        2. Phát hiện Bức tường, Bậc thềm, Bậc tam cấp, Cầu thang qua GeometricHazardDetector
-           (hoạt động cả khi có Depth Map và khi dùng phân tích quang học trực tiếp trên frame_bgr).
-        3. Gắn kết quả ổ gà từ pothole.pt.
+        1. Ưu tiên số 1: Phát hiện Cầu thang / Bậc thềm (`detect_stairs_and_curbs`) và Hố sâu (`detect_ground_dropoff`)
+           TRƯỚC TIÊN để bức tường chiếu nghỉ phía trước cầu thang (1.5m - 1.8m) không bao giờ che mất cảnh báo cầu thang!
+        2. Phát hiện Cây cột (`detect_pillar`), Bức tường (`detect_wall`) và Vật cản lạ chắn ngang (`detect_generic_front_obstacle`).
         """
         dmap = depth_map if depth_map is not None else self.get_latest_depth_map()
         if frame_bgr is not None and frame_bgr.size > 0:
@@ -381,7 +405,7 @@ class DepthService:
                         return True
             return False
 
-        # 1. Quét các vật thể/kiến trúc quan trọng từ SegFormer (cột nhà, cửa) mà YOLO bỏ sót
+        # 1. Quét các vật thể/kiến trúc quan trọng từ SegFormer (cầu thang, cột nhà, cửa) mà YOLO bỏ sót
         with self._lock:
             smap = self._latest_seg_map
 
@@ -399,8 +423,12 @@ class DepthService:
 
                 matched = None
                 for p in parts:
-                    # Dùng SegFormer cho cột nhà / cửa / tủ kệ (YOLO COCO không có các lớp này)
-                    if p in ("column", "pillar", "door", "double door", "cabinet", "wardrobe", "bookcase", "chest of drawers", "shelf"):
+                    # Dùng SegFormer cho cầu thang / cột nhà / cửa / tủ kệ (YOLO COCO không có các lớp này)
+                    if p in (
+                        "stairway", "stairs", "step", "escalator",
+                        "column", "pillar", "door", "double door",
+                        "cabinet", "wardrobe", "bookcase", "chest of drawers", "shelf",
+                    ):
                         matched = SEG_OBSTACLE_MAP[p]
                         break
                 if not matched:
@@ -417,63 +445,42 @@ class DepthService:
 
                 if dmap is not None and dmap.size > 0:
                     obj_depths = dmap[mask > 0]
-                    dist_m = round(float(np.median(obj_depths)), 1) if obj_depths.size > 0 else 1.8
+                    raw_d = float(np.median(obj_depths)) if obj_depths.size > 0 else 1.8
+                    dist_m = round(min(raw_d, 1.6), 1) if cls_en == "stairs" else round(raw_d, 1)
                 else:
-                    dist_m = 1.8
+                    dist_m = 1.6 if cls_en == "stairs" else 1.8
 
-                if dist_m <= 2.2:
+                max_valid_d = 2.4 if cls_en == "stairs" else 2.2
+                if dist_m <= max_valid_d:
                     cx = (bx1 + bx2) / 2.0
-                    pos = "left" if cx < w / 3.0 else ("right" if cx > 2.0 * w / 3.0 else "center")
+                    pos = "center" if cls_en == "stairs" else ("left" if cx < w / 3.0 else ("right" if cx > 2.0 * w / 3.0 else "center"))
                     results.append({
                         "class_name": cls_en,
                         "class_name_vn": cls_vn,
-                        "confidence": 0.82,
+                        "confidence": 0.85 if cls_en == "stairs" else 0.82,
                         "position": pos,
                         "distance_m": dist_m,
                         "bounding_box": {"x1": bx1, "y1": by1, "x2": bx2, "y2": by2},
                         "in_roi": True,
-                        "is_danger": dist_m <= 2.0,
+                        "is_danger": dist_m <= (2.4 if cls_en == "stairs" else 2.0),
                         "is_unknown": True,
                     })
                     known_boxes.append({"x1": bx1, "y1": by1, "x2": bx2, "y2": by2})
 
-        # 2. PHÁT HIỆN HÌNH HỌC & QUANG HỌC: CỘT NHÀ (PILLAR), BỨC TƯỜNG (WALL) HOẶC BẬC THỀM / CẦU THANG
+        # 2. PHÁT HIỆN HÌNH HỌC & QUANG HỌC: ƯU TIÊN CẦU THANG & HỐ SÂU TRƯỚC, SAU ĐÓ MỚI TỚI CỘT / TƯỜNG / VẬT CẢN
         wall_or_pillar_detected = wall_found_by_seg
         try:
             from app.vision.geometric_hazard_detector import geometric_hazard_detector
 
-            # Kiểm tra xem phía trước đã có vật thể YOLO/SegFormer GẦN nào nằm chắn ở làn giữa / hành lang chưa
             has_center_known_obstacle = any(
                 (k.get("x1", 0) < 0.65 * w and k.get("x2", 0) > 0.35 * w)
                 for k in known_boxes
             )
 
-            # A1. Kiểm tra Cây cột / Trụ đứng (Pillar / Column) chắn trước mặt (cách <= 1.75m):
-            if not wall_or_pillar_detected and not has_center_known_obstacle:
-                pillar_hazard = geometric_hazard_detector.detect_pillar(
-                    dmap, known_boxes=known_boxes, frame_bgr=frame_bgr
-                )
-                if pillar_hazard:
-                    results.append(pillar_hazard)
-                    known_boxes.append(pillar_hazard["bounding_box"])
-                    wall_or_pillar_detected = True
-                    has_center_known_obstacle = True
-
-            # A2. Kiểm tra Bức tường chắn trước mặt:
-            if not wall_or_pillar_detected and not has_center_known_obstacle:
-                wall_hazard = geometric_hazard_detector.detect_wall(
-                    dmap, known_boxes=known_boxes, frame_bgr=frame_bgr
-                )
-                if wall_hazard:
-                    results.append(wall_hazard)
-                    known_boxes.append(wall_hazard["bounding_box"])
-                    wall_or_pillar_detected = True
-                    has_center_known_obstacle = True
-
-            # B. CHỈ tìm Bậc thềm / Cầu thang dưới chân NẾU phía trước KHÔNG PHẢI LÀ CỘT/TƯỜNG và KHÔNG CÓ TỦ/GHẾ CHẮN GIỮA!
+            # A1. ƯU TIÊN SỐ 1: Kiểm tra Bậc thềm / Cầu thang dưới chân TRƯỚC TIÊN
+            # (để khi đi lên/xuống cầu thang có tường chiếu nghỉ ở 1.5m - 1.8m phía trước, cầu thang không bao giờ bị tường chặn mất!)
             if (
                 os.getenv("ENABLE_GEOMETRIC_STAIRS", "1").lower() in ("1", "true", "yes")
-                and not wall_or_pillar_detected
                 and not has_center_known_obstacle
                 and frame_bgr is not None
                 and frame_bgr.size > 0
@@ -485,13 +492,53 @@ class DepthService:
                     results.append(stairs_hazard)
                     known_boxes.append(stairs_hazard["bounding_box"])
                     has_center_known_obstacle = True
+
+            # A2. Kiểm tra Hố sâu / Sụt lún / Bậc hụt chân dưới đất (Ground Drop-off):
+            if not has_center_known_obstacle:
+                dropoff_hazard = geometric_hazard_detector.detect_ground_dropoff(
+                    dmap, known_boxes=known_boxes
+                )
+                if dropoff_hazard:
+                    results.append(dropoff_hazard)
+                    known_boxes.append(dropoff_hazard["bounding_box"])
+                    has_center_known_obstacle = True
+
+            # A3. Kiểm tra Cây cột / Trụ đứng (Pillar / Column) chắn trước mặt (cách <= 1.75m):
+            if not wall_or_pillar_detected and not has_center_known_obstacle:
+                pillar_hazard = geometric_hazard_detector.detect_pillar(
+                    dmap, known_boxes=known_boxes, frame_bgr=frame_bgr
+                )
+                if pillar_hazard:
+                    results.append(pillar_hazard)
+                    known_boxes.append(pillar_hazard["bounding_box"])
+                    wall_or_pillar_detected = True
+                    has_center_known_obstacle = True
+
+            # A4. Kiểm tra Bức tường chắn trước mặt:
+            if not wall_or_pillar_detected and not has_center_known_obstacle:
+                wall_hazard = geometric_hazard_detector.detect_wall(
+                    dmap, known_boxes=known_boxes, frame_bgr=frame_bgr
+                )
+                if wall_hazard:
+                    results.append(wall_hazard)
+                    known_boxes.append(wall_hazard["bounding_box"])
+                    wall_or_pillar_detected = True
+                    has_center_known_obstacle = True
+
+            # A5. Kiểm tra Vật cản lạ chắn ngang phía trước (như tấm bạt căng ngang, rèm chắn <= 1.50m):
+            if not wall_or_pillar_detected and not has_center_known_obstacle:
+                generic_obs = geometric_hazard_detector.detect_generic_front_obstacle(
+                    dmap, known_boxes=known_boxes, frame_bgr=frame_bgr
+                )
+                if generic_obs:
+                    results.append(generic_obs)
+                    known_boxes.append(generic_obs["bounding_box"])
+                    has_center_known_obstacle = True
         except Exception:
             pass
 
         # 3. QUY TẮC ĐẢO NGƯỢC AN TOÀN P0 (SAFETY INVERSION RULE TỪ DEPTH MAP):
-        # Nếu làn giữa có diện tích lớn (< 1.28m) bị chắn (ví dụ cây cột 1.2m ngay trước mặt)
-        # mà chưa có vật cản nào ở làn giữa được phát hiện (kể cả khi hai bên hoặc ở xa có bàn ghế)
-        # -> BẮT BUỘC phát cảnh báo vật cản phía trước, tuyệt đối không bỏ sót!
+        # Chỉ kích hoạt khi vật cản áp sát <= 0.98m (dưới 1 bước chân) để không báo nhầm khi tường còn cách 2 bước chân!
         if dmap is not None and dmap.size > 0 and not any(
             (k.get("x1", 0) < 0.65 * w and k.get("x2", 0) > 0.35 * w) for k in known_boxes
         ):
@@ -500,16 +547,16 @@ class DepthService:
             cx1, cx2 = int(dw * 0.33), int(dw * 0.67)
             center_lane = dmap[cy1:cy2, cx1:cx2]
             if center_lane.size > 0:
-                close_ratio = float(np.mean(center_lane < 1.28))
+                close_ratio = float(np.mean(center_lane < 0.98))
                 median_center_z = float(np.median(center_lane))
-                if close_ratio >= 0.35 or median_center_z <= 1.25:
+                if close_ratio >= 0.42 or median_center_z <= 0.95:
                     cls_en, cls_vn = self._classify_front_region(cx1, cy1, cx2, cy2)
                     results.append({
                         "class_name": cls_en,
                         "class_name_vn": cls_vn,
                         "confidence": 0.88,
                         "position": "center",
-                        "distance_m": round(max(0.4, min(median_center_z, 1.25)), 1),
+                        "distance_m": round(max(0.4, min(median_center_z, 0.95)), 1),
                         "bounding_box": {"x1": int(cx1 * w / dw), "y1": int(cy1 * h / dh), "x2": int(cx2 * w / dw), "y2": int(cy2 * h / dh)},
                         "in_roi": True,
                         "is_danger": True,
@@ -521,7 +568,8 @@ class DepthService:
     def analyze_three_lanes_depth(self, depth_map: Optional[np.ndarray] = None) -> Dict[str, Any]:
         """
         Phân tích 3 làn (Trái / Giữa / Phải) trực tiếp từ bản đồ độ sâu (Depth Map):
-        Trả về khoảng cách trung vị (m) và tỷ lệ bị chắn (< 1.25m, < 2.0m) của từng làn.
+        Trả về khoảng cách trung vị (m) và tỷ lệ bị chắn (< 1.00m, < 2.0m) của từng làn.
+        Chỉ đánh dấu `is_blocked=True` khi khoảng cách <= 1.00m để người dùng còn đủ 2 bước chân đi tiếp khi cách tường 1.2m - 1.8m.
         """
         dmap = depth_map if depth_map is not None else self.get_latest_depth_map()
         if dmap is None or dmap.size == 0:
@@ -543,13 +591,13 @@ class DepthService:
                 lanes_info[name] = {"median_m": 4.0, "close_ratio": 0.0, "mid_ratio": 0.0, "is_blocked": False}
                 continue
             med = round(float(np.median(patch)), 2)
-            close_r = round(float(np.mean(patch < 1.25)), 2)
+            close_r = round(float(np.mean(patch < 1.00)), 2)
             mid_r = round(float(np.mean(patch < 2.0)), 2)
             lanes_info[name] = {
                 "median_m": med,
                 "close_ratio": close_r,
                 "mid_ratio": mid_r,
-                "is_blocked": (close_r >= 0.35 or med <= 1.35),
+                "is_blocked": (close_r >= 0.42 or med <= 1.00),
             }
 
         return {"has_depth": True, "lanes": lanes_info}

@@ -476,6 +476,280 @@
         .toggle-switch input {
             cursor: pointer;
         }
+
+        /* KHUNG GIAO DIỆN MULTI-MODEL SPATIAL-TEMPORAL FUSION ENGINE */
+        .fusion-engine-section {
+            background: linear-gradient(180deg, rgba(14, 22, 38, 0.92), rgba(9, 14, 24, 0.96));
+            border: 1px solid rgba(0, 240, 255, 0.28);
+            border-radius: 14px;
+            padding: 12px 16px;
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), inset 0 0 24px rgba(0, 240, 255, 0.04);
+        }
+
+        .fusion-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .fusion-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.88rem;
+            font-weight: 800;
+            color: var(--neon-cyan);
+            letter-spacing: 0.4px;
+        }
+
+        .fusion-subtitle {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .fusion-pipeline-grid {
+            display: grid;
+            grid-template-columns: 1.35fr 1fr 1.15fr 1.1fr;
+            gap: 18px;
+            align-items: stretch;
+        }
+
+        @media (max-width: 1200px) {
+            .fusion-pipeline-grid {
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+            }
+        }
+
+        .fusion-stage-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+            position: relative;
+        }
+
+        @media (min-width: 1201px) {
+            .fusion-stage-card:not(:last-child)::after {
+                content: "➔";
+                position: absolute;
+                right: -15px;
+                top: 50%;
+                transform: translateY(-50%);
+                color: var(--neon-cyan);
+                font-size: 0.9rem;
+                font-weight: 800;
+                opacity: 0.75;
+                pointer-events: none;
+            }
+        }
+
+        .fusion-stage-header {
+            font-size: 0.72rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: #cbd5e1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            letter-spacing: 0.3px;
+        }
+
+        .branch-list {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+
+        .branch-item {
+            background: rgba(0, 0, 0, 0.32);
+            border-left: 3px solid var(--neon-cyan);
+            border-radius: 6px;
+            padding: 5px 8px;
+            font-size: 0.72rem;
+        }
+
+        .branch-item.b-depth { border-left-color: #ff9e00; }
+        .branch-item.b-sam { border-left-color: #b5179e; }
+        .branch-item.b-seg { border-left-color: var(--neon-green); }
+
+        .branch-name {
+            font-weight: 800;
+            color: #fff;
+            font-size: 0.72rem;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .branch-detail {
+            color: var(--text-muted);
+            font-size: 0.67rem;
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .fusion-metrics-list {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            font-size: 0.74rem;
+        }
+
+        .fusion-metric-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 8px;
+            background: rgba(0, 0, 0, 0.28);
+            border-radius: 6px;
+        }
+
+        .fusion-metric-val {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+            color: var(--neon-cyan);
+        }
+
+        .lane-matrix-rows {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .lane-row {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .lane-row-top {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.71rem;
+            font-weight: 700;
+        }
+
+        .lane-bar-track {
+            width: 100%;
+            height: 7px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .lane-bar-fill {
+            height: 100%;
+            border-radius: 999px;
+            background: var(--neon-green);
+            transition: width 0.25s ease, background 0.25s ease;
+        }
+
+        .lane-bar-fill.blocked {
+            background: var(--neon-red);
+        }
+
+        .decision-state-pill {
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.74rem;
+            font-weight: 800;
+            text-align: center;
+            background: rgba(0, 255, 136, 0.12);
+            border: 1px solid rgba(0, 255, 136, 0.4);
+            color: var(--neon-green);
+        }
+
+        .decision-state-pill.warn {
+            background: rgba(255, 183, 3, 0.14);
+            border-color: rgba(255, 183, 3, 0.45);
+            color: var(--neon-amber);
+        }
+
+        .decision-state-pill.danger {
+            background: rgba(255, 42, 85, 0.16);
+            border-color: rgba(255, 42, 85, 0.5);
+            color: var(--neon-red);
+        }
+
+        .source-tag {
+            display: inline-block;
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-size: 0.62rem;
+            font-family: 'JetBrains Mono', monospace;
+            background: rgba(0, 240, 255, 0.14);
+            color: var(--neon-cyan);
+            margin-left: 5px;
+        }
+
+        .fusion-code-badge {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.76rem;
+            background: rgba(0, 240, 255, 0.12);
+            color: var(--neon-cyan);
+            padding: 1px 6px;
+            border-radius: 5px;
+            border: 1px solid rgba(0, 240, 255, 0.25);
+        }
+
+        .fusion-trace-box {
+            margin-top: 10px;
+            padding: 8px 12px;
+            border-radius: 10px;
+            background: rgba(4, 7, 15, 0.78);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .fusion-trace-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.72rem;
+            font-weight: 800;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            letter-spacing: 0.3px;
+        }
+
+        .fusion-trace-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            max-height: 92px;
+            overflow-y: auto;
+        }
+
+        .trace-row {
+            display: grid;
+            grid-template-columns: 64px 128px 1.2fr 1.5fr;
+            gap: 8px;
+            align-items: center;
+            font-size: 0.72rem;
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.03);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .trace-row.prio-HIGH { border-left: 3px solid var(--neon-amber); }
+        .trace-row.prio-CRITICAL, .trace-row.prio-DANGER { border-left: 3px solid var(--neon-red); }
+        .trace-row.prio-LOW { border-left: 3px solid var(--neon-green); }
+
+        .trace-time { color: var(--text-muted); font-size: 0.68rem; }
+        .trace-state { font-weight: 800; color: var(--neon-cyan); font-size: 0.7rem; }
+        .trace-inputs { color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .trace-speech { color: #fff; font-family: 'Outfit', sans-serif; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     </style>
 </head>
 <body>
@@ -619,13 +893,165 @@
 
         </div>
 
+        <!-- KHUNG TRUNG TÂM TỔNG HỢP: MULTI-MODEL SPATIAL-TEMPORAL FUSION ENGINE -->
+        <div class="fusion-engine-section" id="fusionEngineSection">
+            <div class="fusion-header">
+                <div class="fusion-title">
+                    <span>🧠</span> BỘ TỔNG HỢP ĐA MÔ HÌNH: MULTI-MODEL SPATIAL-TEMPORAL FUSION ENGINE <span class="fusion-code-badge">fusion_engine.py</span> + <span class="fusion-code-badge">guided_scan.py</span>
+                </div>
+                <div class="fusion-subtitle" id="fusionHeaderMeta">
+                    4 AI Models Active • IoU Deduplication • EMA Smoothing (α=0.65) • Real-time 3-Lane Decision
+                </div>
+            </div>
+
+            <div class="fusion-pipeline-grid">
+                <!-- BƯỚC 1: THU THẬP TỪ 4 NHÁNH MODEL -->
+                <div class="fusion-stage-card">
+                    <div class="fusion-stage-header">
+                        <span>① ĐẦU VÀO TỪ 4 NHÁNH MODEL AI</span>
+                        <span style="color: var(--neon-cyan);" id="fusionRawBadge">0 ứng viên</span>
+                    </div>
+                    <div class="branch-list">
+                        <div class="branch-item">
+                            <div class="branch-name">
+                                <span>📹 YOLO11n</span>
+                                <span id="branchYoloCount">0</span>
+                            </div>
+                            <div class="branch-detail" id="branchYoloDetail">Chờ nhận diện...</div>
+                        </div>
+                        <div class="branch-item b-depth">
+                            <div class="branch-name">
+                                <span>🌊 Depth V2</span>
+                                <span id="branchDepthStatus">Metric Z</span>
+                            </div>
+                            <div class="branch-detail" id="branchDepthDetail">T:--m | G:--m | P:--m</div>
+                        </div>
+                        <div class="branch-item b-sam">
+                            <div class="branch-name">
+                                <span>🧩 EdgeSAM</span>
+                                <span id="branchSamCount">Mask 320p</span>
+                            </div>
+                            <div class="branch-detail" id="branchSamDetail">Lọc độ sâu theo pixel mask</div>
+                        </div>
+                        <div class="branch-item b-seg">
+                            <div class="branch-name">
+                                <span>📐 SegFormer+3D</span>
+                                <span id="branchSegCount">0</span>
+                            </div>
+                            <div class="branch-detail" id="branchSegDetail">Cầu thang / Hố sâu / Tường</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BƯỚC 2: KHỬ TRÙNG LẶP IOU & LÀM MƯỢT EMA -->
+                <div class="fusion-stage-card">
+                    <div class="fusion-stage-header">
+                        <span>② HỢP NHẤT KHÔNG GIAN - THỜI GIAN</span>
+                        <span style="color: var(--neon-green);">IoU + EMA</span>
+                    </div>
+                    <div class="fusion-metrics-list">
+                        <div class="fusion-metric-row">
+                            <span>Tổng ứng viên thô (Raw):</span>
+                            <span class="fusion-metric-val" id="metricRawCount">0</span>
+                        </div>
+                        <div class="fusion-metric-row">
+                            <span>Đã gộp trùng không gian (IoU ≥ 0.35):</span>
+                            <span class="fusion-metric-val" id="metricDedupCount">0</span>
+                        </div>
+                        <div class="fusion-metric-row">
+                            <span>Quỹ đạo làm mượt EMA (α=0.65):</span>
+                            <span class="fusion-metric-val" id="metricEmaTracks">0 tracks</span>
+                        </div>
+                        <div class="fusion-metric-row">
+                            <span>Vật cản nguy hiểm sau hợp nhất:</span>
+                            <span class="fusion-metric-val" style="color: var(--neon-red);" id="metricDangerCount">0 nguy hiểm</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BƯỚC 3: MA TRẬN KHOẢNG TRỐNG 3 LÀN -->
+                <div class="fusion-stage-card">
+                    <div class="fusion-stage-header">
+                        <span>③ MA TRẬN KHOẢNG TRỐNG 3 LÀN</span>
+                        <span id="fusionInstantAction" style="color: var(--neon-green);">GO_STRAIGHT</span>
+                    </div>
+                    <div class="lane-matrix-rows">
+                        <div class="lane-row">
+                            <div class="lane-row-top">
+                                <span>⬅️ Làn Trái (Left)</span>
+                                <span id="laneLeftText">3.5m • TRỐNG</span>
+                            </div>
+                            <div class="lane-bar-track">
+                                <div class="lane-bar-fill" id="laneLeftBar" style="width: 85%;"></div>
+                            </div>
+                        </div>
+                        <div class="lane-row">
+                            <div class="lane-row-top">
+                                <span>⬆️ Làn Giữa (Center ROI)</span>
+                                <span id="laneCenterText">3.5m • TRỐNG</span>
+                            </div>
+                            <div class="lane-bar-track">
+                                <div class="lane-bar-fill" id="laneCenterBar" style="width: 85%;"></div>
+                            </div>
+                        </div>
+                        <div class="lane-row">
+                            <div class="lane-row-top">
+                                <span>➡️ Làn Phải (Right)</span>
+                                <span id="laneRightText">3.5m • TRỐNG</span>
+                            </div>
+                            <div class="lane-bar-track">
+                                <div class="lane-bar-fill" id="laneRightBar" style="width: 85%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BƯỚC 4: MÁY TRẠNG THÁI QUYẾT ĐỊNH & GIỌNG NÓI -->
+                <div class="fusion-stage-card">
+                    <div class="fusion-stage-header">
+                        <span>④ MÁY TRẠNG THÁI & LỜI CẢNH BÁO</span>
+                        <span id="ttsTriggerBadge" style="color: var(--neon-cyan);">CHỜ QUÉT</span>
+                    </div>
+                    <div class="decision-state-pill" id="decisionStatePill">
+                        ĐI THẲNG AN TOÀN (CLEAR)
+                    </div>
+                    <div class="fusion-metrics-list" style="margin-top: 2px;">
+                        <div class="fusion-metric-row">
+                            <span>Chuỗi frame ổn định:</span>
+                            <span class="fusion-metric-val" id="decisionFramesText">Clear: 0 | Block: 0</span>
+                        </div>
+                        <div class="fusion-metric-row">
+                            <span>Đầu ra giọng nói:</span>
+                            <span class="fusion-metric-val" style="font-size: 0.68rem;" id="decisionVoiceEngine">Blaze TTS + QUEUE_ADD</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- NHẬT KÝ TRUY VẾT SUY LUẬN ĐA MÔ HÌNH -> CẢNH BÁO GIỌNG NÓI -->
+            <div class="fusion-trace-box">
+                <div class="fusion-trace-header">
+                    <span>📜 NHẬT KÝ TRUY VẾT LUỒNG SUY LUẬN (4 NHÁNH MODEL ➔ FUSION ➔ BLAZE TTS)</span>
+                    <span id="traceCountMeta">0 sự kiện đã ghi</span>
+                </div>
+                <div class="fusion-trace-list" id="fusionTraceList">
+                    <div class="trace-row prio-LOW">
+                        <span class="trace-time">--:--:--</span>
+                        <span class="trace-state">READY</span>
+                        <span class="trace-inputs">4 AI Models chờ tín hiệu camera từ điện thoại...</span>
+                        <span class="trace-speech">Hệ thống sẵn sàng dẫn đường giọng nói</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- BẢNG DẪN ĐƯỜNG TRUNG TÂM (NAVIGATION & GUIDANCE) -->
         <div class="bottom-hud">
             
             <!-- HƯỚNG DẪN GIỌNG NÓI -->
             <div class="hud-card">
                 <div class="hud-title">
-                    <span>📢</span> HƯỚNG DẪN & CẢNH BÁO TỨC THÌ (TTS BLACE)
+                    <span>📢</span> HƯỚNG DẪN & CẢNH BÁO TỨC THÌ (BLAZE AI TTS & NATIVE VOICE)
                 </div>
                 <div class="guidance-banner" id="guidanceBanner">
                     <div class="guidance-icon" id="guidanceIcon">🛡️</div>
@@ -693,12 +1119,29 @@
         let autoSamInterval = null;
         let is3DVideoPlaying = false;
 
-        // Âm thanh Web Speech API
-        function speakWeb(text) {
-            if (!document.getElementById('chkTtsWeb').checked) return;
+        let lastWebSpokenText = "";
+        let lastWebSpokenTime = 0;
+
+        // Âm thanh Web Speech API (hỗ trợ ngắt khẩn cấp khi gặp nguy hiểm và phát nối tiếp khi đã rẽ sang hướng an toàn)
+        function speakWeb(text, priority = "LOW") {
+            if (!text || !document.getElementById('chkTtsWeb').checked) return;
             if (!('speechSynthesis' in window)) return;
+            const now = Date.now();
+            const isSafe = text.toLowerCase().includes("an toàn") || text.toLowerCase().includes("thông thoáng");
+            const wasSafe = lastWebSpokenText.toLowerCase().includes("an toàn") || lastWebSpokenText.toLowerCase().includes("thông thoáng");
+            const isTransitionToSafe = isSafe && !wasSafe && lastWebSpokenText.length > 0;
+
+            if (text === lastWebSpokenText && (now - lastWebSpokenTime) < (isSafe ? 5500 : 2200)) {
+                return;
+            }
             try {
-                window.speechSynthesis.cancel();
+                // Nếu chuyển sang nguy hiểm hoặc từ an toàn sang vật cản -> ngắt ngay câu cũ;
+                // Nếu vừa rẽ xong chuyển sang "Phía trước an toàn, đi thẳng" -> xếp hàng đọc nối tiếp ngay sau câu rẽ!
+                if (!isTransitionToSafe) {
+                    window.speechSynthesis.cancel();
+                }
+                lastWebSpokenText = text;
+                lastWebSpokenTime = now;
                 const utter = new SpeechSynthesisUtterance(text);
                 utter.lang = 'vi-VN';
                 utter.rate = 1.05;
@@ -861,6 +1304,11 @@
                 const fps = Math.round(1000 / delta);
                 document.getElementById('fpsText').innerText = Math.min(30, Math.max(1, fps));
             }
+            if (data.processing_ms !== undefined && data.processing_ms !== null) {
+                document.getElementById('latencyText').innerText = `${Math.round(data.processing_ms)} ms`;
+            } else if (delta > 0) {
+                document.getElementById('latencyText').innerText = `${Math.round(delta)} ms`;
+            }
 
             // 2. MÀN HÌNH 1: YOLO STREAM
             if (data.frame_b64) {
@@ -909,6 +1357,9 @@
                     document.getElementById('guidanceText').innerText = text;
                     document.getElementById('guidanceMeta').innerText = `Mức độ: ${prio} • Chống lặp giọng nói thông minh`;
                 }
+                if (data.guidance.text) {
+                    speakWeb(data.guidance.text, prio);
+                }
 
                 let icon = "🛡️";
                 if (prio === "CRITICAL" || prio === "DANGER") icon = "⚠️";
@@ -945,6 +1396,191 @@
                     dirTextEl.style.color = "var(--neon-green)";
                 }
                 descEl.innerText = data.navigation.description || data.navigation.text || "Lối đi thông thoáng";
+            }
+
+            // 6. CẬP NHẬT KHUNG TRUNG TÂM MULTI-MODEL FUSION ENGINE
+            renderFusionEngineHud(data);
+        }
+
+        // Cập nhật trực quan 4 bước của Multi-Model Spatial-Temporal Fusion Engine
+        function renderFusionEngineHud(data) {
+            const nav = data.navigation || {};
+            const fs = nav.fusion_summary || {};
+            const branches = fs.model_branches || {};
+            const lanes = fs.lane_clearance || {};
+            const dt = fs.decision_telemetry || {};
+
+            // Bước 1: 4 Nhánh Model AI
+            const rawCnt = fs.raw_candidate_count !== undefined ? fs.raw_candidate_count : (data.objects ? data.objects.length : 0);
+            document.getElementById('fusionRawBadge').innerText = `${rawCnt} ứng viên`;
+
+            if (branches.yolo11) {
+                document.getElementById('branchYoloCount').innerText = `${branches.yolo11.count || 0} obj`;
+                document.getElementById('branchYoloDetail').innerText = branches.yolo11.detail || "Không có vật thể định danh";
+            }
+            if (branches.depth_v2) {
+                document.getElementById('branchDepthStatus').innerText = branches.depth_v2.has_depth ? `${branches.depth_v2.center_m}m` : "Metric Z";
+                document.getElementById('branchDepthDetail').innerText = branches.depth_v2.detail || "T:--m | G:--m | P:--m";
+                const dMedEl = document.getElementById('depthMedianText');
+                if (dMedEl && branches.depth_v2.center_m) {
+                    dMedEl.innerText = `Độ sâu giữa: ${branches.depth_v2.center_m}m`;
+                }
+            }
+            if (branches.edgesam) {
+                const samMasks = branches.edgesam.active_masks !== undefined ? branches.edgesam.active_masks : (branches.edgesam.refined_boxes || 0);
+                document.getElementById('branchSamCount').innerText = `${samMasks} mask`;
+                document.getElementById('branchSamDetail').innerText = branches.edgesam.detail || "Lọc độ sâu theo pixel mask";
+            }
+            if (branches.segformer_geo) {
+                document.getElementById('branchSegCount').innerText = `${branches.segformer_geo.count || 0} hz`;
+                document.getElementById('branchSegDetail').innerText = branches.segformer_geo.detail || "Mặt sàn & kiến trúc thông thoáng";
+            }
+
+            // Bước 2: Khử trùng lặp IoU & Làm mượt EMA
+            document.getElementById('metricRawCount').innerText = rawCnt;
+            document.getElementById('metricDedupCount').innerText = fs.dedup_removed_count !== undefined ? `${fs.dedup_removed_count} trùng lặp` : "0 trùng lặp";
+            document.getElementById('metricEmaTracks').innerText = `${fs.ema_active_tracks !== undefined ? fs.ema_active_tracks : rawCnt} tracks`;
+            const dangerCnt = fs.danger_obstacle_count !== undefined ? fs.danger_obstacle_count : 0;
+            const dangerEl = document.getElementById('metricDangerCount');
+            dangerEl.innerText = `${dangerCnt} nguy hiểm / ${fs.fused_obstacle_count !== undefined ? fs.fused_obstacle_count : rawCnt} vật thể`;
+            dangerEl.style.color = dangerCnt > 0 ? "var(--neon-red)" : "var(--neon-green)";
+
+            // Bước 3: Ma trận khoảng trống 3 làn
+            const instantAct = fs.instant_action || "GO_STRAIGHT";
+            const actEl = document.getElementById('fusionInstantAction');
+            actEl.innerText = instantAct;
+            actEl.style.color = instantAct === "GO_STRAIGHT" ? "var(--neon-green)" : (instantAct === "TURN_AROUND" ? "var(--neon-red)" : "var(--neon-amber)");
+
+            const updateLaneBar = (laneObj, textId, barId) => {
+                if (!laneObj) return;
+                const distM = laneObj.clear_distance_m !== undefined ? laneObj.clear_distance_m : 3.5;
+                const blocked = Boolean(laneObj.is_blocked);
+                const hz = laneObj.primary_hazard ? ` (${laneObj.primary_hazard})` : "";
+                const tEl = document.getElementById(textId);
+                const bEl = document.getElementById(barId);
+                if (tEl) {
+                    tEl.innerText = `${distM.toFixed(1)}m • ${blocked ? 'CHẮN' + hz : 'TRỐNG'}`;
+                    tEl.style.color = blocked ? "var(--neon-red)" : "var(--neon-green)";
+                }
+                if (bEl) {
+                    const pct = Math.max(12, Math.min(100, Math.round((distM / 4.0) * 100)));
+                    bEl.style.width = `${pct}%`;
+                    if (blocked) bEl.classList.add('blocked');
+                    else bEl.classList.remove('blocked');
+                }
+            };
+            updateLaneBar(lanes.left, 'laneLeftText', 'laneLeftBar');
+            updateLaneBar(lanes.center, 'laneCenterText', 'laneCenterBar');
+            updateLaneBar(lanes.right, 'laneRightText', 'laneRightBar');
+
+            // Bước 4: Máy trạng thái Guided Scan & Lời cảnh báo
+            const statePill = document.getElementById('decisionStatePill');
+            const stateCode = dt.state_code || "CLEAR";
+            if (statePill) {
+                statePill.innerText = dt.state_label || "ĐI THẲNG AN TOÀN (CLEAR)";
+                statePill.className = "decision-state-pill";
+                if (stateCode === "TURN_AROUND" || stateCode === "STEPS") {
+                    statePill.classList.add('danger');
+                } else if (stateCode.startsWith("TURN_") || stateCode.startsWith("ALLEY_DRIFT")) {
+                    statePill.classList.add('warn');
+                }
+            }
+            const framesEl = document.getElementById('decisionFramesText');
+            if (framesEl) {
+                framesEl.innerText = `Clear: ${dt.clear_frames || 0}f | Block: ${dt.blocked_frames || 0}f`;
+            }
+            const trigBadge = document.getElementById('ttsTriggerBadge');
+            if (trigBadge) {
+                if (dt.spoken_this_frame) {
+                    trigBadge.innerText = "🔊 PHÁT NGAY (0ms)";
+                    trigBadge.style.color = "var(--neon-amber)";
+                } else {
+                    trigBadge.innerText = `CHỐNG LẶP (${dt.since_last_speech_s || 0}s)`;
+                    trigBadge.style.color = "var(--neon-cyan)";
+                }
+            }
+
+            appendFusionTraceLog(data, fs, lanes, dt);
+        }
+
+        const fusionTraceHistory = [];
+        let lastTraceKey = "";
+        let lastSpokenEventId = "";
+        let totalTraceEvents = 0;
+
+        // Ghi nhật ký mỗi lần máy trạng thái đổi hướng hoặc phát giọng nói để hội đồng dễ theo dõi chuỗi suy luận
+        function appendFusionTraceLog(data, fs, lanes, dt) {
+            const listEl = document.getElementById('fusionTraceList');
+            const metaEl = document.getElementById('traceCountMeta');
+            if (!listEl) return;
+
+            const guidance = data.guidance || {};
+            const speechText = (guidance.display_text || guidance.text || "").trim();
+            const stateCode = dt.state_code || fs.instant_action || "CLEAR";
+            const spokenNow = Boolean(dt.spoken_this_frame || (guidance.text && guidance.text.trim().length > 0));
+            const curKey = `${stateCode}|${speechText}`;
+            const spokenId = dt.last_speech_ts !== undefined ? `${dt.last_speech_ts}|${speechText}` : curKey;
+
+            if (spokenNow) {
+                if (spokenId === lastSpokenEventId && curKey === lastTraceKey) return;
+                lastSpokenEventId = spokenId;
+            } else if (curKey === lastTraceKey) {
+                return;
+            }
+            if (!speechText) return;
+            lastTraceKey = curKey;
+            totalTraceEvents += 1;
+
+            const nowStr = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+            const branches = fs.model_branches || {};
+            const yoloCnt = (branches.yolo11 && branches.yolo11.count) || 0;
+            const segCnt = (branches.segformer_geo && branches.segformer_geo.count) || 0;
+            const samMasks = (branches.edgesam && branches.edgesam.active_masks) || 0;
+            const lDist = lanes.left && lanes.left.clear_distance_m !== undefined ? lanes.left.clear_distance_m.toFixed(1) : "--";
+            const cDist = lanes.center && lanes.center.clear_distance_m !== undefined ? lanes.center.clear_distance_m.toFixed(1) : "--";
+            const rDist = lanes.right && lanes.right.clear_distance_m !== undefined ? lanes.right.clear_distance_m.toFixed(1) : "--";
+
+            const inputSummary = `YOLO:${yoloCnt} • Seg3D:${segCnt} • SAM:${samMasks} | T:${lDist}m G:${cDist}m P:${rDist}m`;
+            const prio = guidance.priority || "LOW";
+
+            fusionTraceHistory.unshift({
+                time: nowStr,
+                state: spokenNow ? `🔊 ${stateCode}` : stateCode,
+                inputs: inputSummary,
+                speech: speechText,
+                prio,
+            });
+            if (fusionTraceHistory.length > 6) {
+                fusionTraceHistory.pop();
+            }
+
+            listEl.replaceChildren();
+            fusionTraceHistory.forEach(entry => {
+                const row = document.createElement('div');
+                row.className = `trace-row prio-${entry.prio}`;
+
+                const tSpan = document.createElement('span');
+                tSpan.className = 'trace-time';
+                tSpan.textContent = entry.time;
+
+                const sSpan = document.createElement('span');
+                sSpan.className = 'trace-state';
+                sSpan.textContent = entry.state;
+
+                const iSpan = document.createElement('span');
+                iSpan.className = 'trace-inputs';
+                iSpan.textContent = entry.inputs;
+
+                const spSpan = document.createElement('span');
+                spSpan.className = 'trace-speech';
+                spSpan.textContent = `"${entry.speech}"`;
+
+                row.append(tSpan, sSpan, iSpan, spSpan);
+                listEl.appendChild(row);
+            });
+
+            if (metaEl) {
+                metaEl.textContent = `${totalTraceEvents} sự kiện đã ghi`;
             }
         }
 
@@ -1054,9 +1690,10 @@
                 const dist = obj.distance_m ? `${obj.distance_m.toFixed(1)}m` : "--";
                 const isDanger = obj.is_danger || obj.in_roi;
                 const pos = obj.position === "center" ? "Giữa" : (obj.position === "left" ? "Trái" : "Phải");
+                const src = obj.source_model ? `<span class="source-tag">${obj.source_model}</span>` : "";
                 html += `
                     <div class="obj-row ${isDanger ? 'danger' : ''}">
-                        <span class="obj-name">${isDanger ? '⚠️ ' : ''}${name} (${pos})</span>
+                        <span class="obj-name">${isDanger ? '⚠️ ' : ''}${name} (${pos})${src}</span>
                         <span class="obj-dist">${dist}</span>
                     </div>
                 `;

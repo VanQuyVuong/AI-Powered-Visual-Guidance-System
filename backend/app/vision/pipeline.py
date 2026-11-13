@@ -36,7 +36,7 @@ OBSTACLE_CLASSES = {
     "dog", "cat", "car", "motorcycle", "bicycle", "bus", "truck",
     "door", "stairs", "stair", "step", "curb", "doorstep", "threshold",
     "stop sign", "traffic light", "fire hydrant",
-    "wall", "column", "pillar", "cabinet", "obstacle", "multi_obstacle", "pothole"
+    "wall", "column", "pillar", "cabinet", "obstacle", "multi_obstacle", "pothole", "dropoff"
 }
 
 # Các lớp đồ vật lớn
@@ -50,7 +50,37 @@ from app.vision.guided_scan import (  # noqa: E402
     voice_state as _voice_state,
     reset_voice_state,
     update_spatial_scan_and_voice,
+    get_decision_telemetry,
 )
+
+
+def _sync_navigation_with_decision(
+    nav_data: dict,
+    decision_telemetry: dict,
+    display_text: str,
+) -> dict:
+    """
+    Đồng bộ mũi tên điều hướng 3 làn (straight / left / right / stop) với kết luận cuối cùng
+    của Guided Scan State Machine để giao diện mũi tên và lời đọc giọng nói luôn nhất quán 100%.
+    """
+    state_code = str((decision_telemetry or {}).get("state_code", "CLEAR"))
+    mapping = {
+        "TURN_LEFT": ("left", "Rẽ trái"),
+        "ALLEY_DRIFT_RIGHT": ("left", "Chỉnh nhẹ sang trái"),
+        "TURN_RIGHT": ("right", "Rẽ phải"),
+        "ALLEY_DRIFT_LEFT": ("right", "Chỉnh nhẹ sang phải"),
+        "TURN_AROUND": ("stop", "Dừng lại / Quay đầu"),
+        "STEPS": ("stop", "Bước chậm / Chú ý dưới chân"),
+        "ALLEY_CLEAR": ("straight", "Đi thẳng trong hẻm"),
+        "CLEAR": ("straight", "Đi thẳng"),
+    }
+    if state_code in mapping:
+        direction, short_label = mapping[state_code]
+        nav_data["direction"] = direction
+        nav_data["text"] = short_label
+        if display_text:
+            nav_data["description"] = display_text
+    return nav_data
 
 
 def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
@@ -58,6 +88,7 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
     Toàn bộ phần xử lý nặng (YOLO + Depth Anything V2 + SegFormer + Geometric Hazard + Tactile Paving).
     Hàm đồng bộ chạy trong threadpool (asyncio.to_thread).
     """
+    t0 = time.perf_counter()
     if not image_bytes:
         raise ValueError("Không thể đọc được ảnh (INVALID_IMAGE)")
 
@@ -70,12 +101,12 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
     depth_service.trigger_async_compute(frame_bgr)
 
     with _inference_lock:
-        raw_detections, img_width, img_height = run_tracking(image_bytes)
+        raw_detections, img_width, img_height = run_tracking(frame_bgr)
 
     # Kích hoạt EdgeSAM chạy ngầm bổ trợ mặt nạ pixel (0ms latency cho luồng chính)
     sam_service.trigger_async_support(frame_bgr, raw_detections)
 
-    is_on_tactile = detect_tactile_paving(image_bytes)
+    is_on_tactile = detect_tactile_paving(frame_bgr)
     dmap = depth_service.get_latest_depth_map()
 
     all_objects = []
@@ -126,10 +157,10 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         else:
             dist_m = round(pinhole_dist, 1)
 
-        overlaps_center = (box["x1"] < 0.65 * img_width and box["x2"] > 0.35 * img_width)
-        # 3. Tiêu chí nguy hiểm chuẩn trong nhà: Chỉ cảnh báo khi vật cản tiến vào phạm vi <= 2.25m ở làn giữa (hoặc <= 1.65m ở hai bên).
-        # Tuyệt đối không cảnh báo nguy hiểm đối với ghế/bàn ở xa 3m - 5.5m!
-        in_path = in_corridor or (pos == "center") or overlaps_center or (box_h_ratio >= 0.28 and dist_m <= 2.25)
+        overlaps_center = (box["x1"] < 0.58 * img_width and box["x2"] > 0.42 * img_width)
+        # 3. Tiêu chí nguy hiểm chuẩn trong nhà: Chỉ cảnh báo chắn lối đi thẳng khi vật cản thực sự nằm ở làn giữa (hoặc tràn sâu vào trục giữa) và <= 2.25m.
+        # Khi người dùng đã rẽ phải/trái làm vật cản dạt sang bên (pos in left/right và không còn đè trục giữa), giải phóng in_path ngay!
+        in_path = (pos == "center") or overlaps_center or (in_corridor and pos == "center")
         is_danger = (in_path and dist_m <= 2.25) or (dist_m <= 1.65)
 
         # Chuẩn hóa confidence >= 0.40 cho các đồ vật nhỏ đã qua lọc
@@ -161,7 +192,8 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
             "bounding_box": box,
             "in_roi": in_corridor or in_path,
             "distance_m": dist_m,
-            "is_danger": is_danger
+            "is_danger": is_danger,
+            "sam_mask_refined": sam_mask_dist is not None,
         })
 
     # 4. CHẠY PHÁT HIỆN CỘT NHÀ, BỨC TƯỜNG, BẬC THỀM, CẦU THANG & VẬT CẢN LẠ (KẾT HỢP DEPTH + GEOMETRIC + EDGESAM)
@@ -196,6 +228,7 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         img_width=img_width,
         img_height=img_height,
         now=now,
+        sam_mask_count=sam_service.get_active_mask_count(),
     )
     all_objects = fusion_result["fused_objects"]
 
@@ -262,6 +295,9 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         now,
     )
     guidance_data["priority"] = cur_prio
+    decision_telem = get_decision_telemetry(now)
+    if isinstance(nav_data.get("fusion_summary"), dict):
+        nav_data["fusion_summary"]["decision_telemetry"] = decision_telem
 
     if should_speak_now:
         guidance_data["display_text"] = cur_text
@@ -272,6 +308,8 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
             guidance_data["text"] = ""
         else:
             guidance_data["text"] = cur_text
+
+    _sync_navigation_with_decision(nav_data, decision_telem, guidance_data.get("display_text", ""))
 
     # 9. Mã hóa frame_b64 và depth_b64 phục vụ xem trực tiếp trên web monitor (/view-phone)
     import base64
@@ -294,9 +332,12 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         except Exception:
             pass
 
+    processing_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+
     return {
         "success": True,
         "mode": get_mode(),
+        "processing_ms": processing_ms,
         "objects": all_objects,
         "has_person_in_roi": has_person_in_roi,
         "has_obstacle_in_roi": has_obstacle_in_roi,
