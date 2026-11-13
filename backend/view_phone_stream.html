@@ -702,6 +702,54 @@
             border-radius: 5px;
             border: 1px solid rgba(0, 240, 255, 0.25);
         }
+
+        .fusion-trace-box {
+            margin-top: 10px;
+            padding: 8px 12px;
+            border-radius: 10px;
+            background: rgba(4, 7, 15, 0.78);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .fusion-trace-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.72rem;
+            font-weight: 800;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            letter-spacing: 0.3px;
+        }
+
+        .fusion-trace-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            max-height: 92px;
+            overflow-y: auto;
+        }
+
+        .trace-row {
+            display: grid;
+            grid-template-columns: 64px 128px 1.2fr 1.5fr;
+            gap: 8px;
+            align-items: center;
+            font-size: 0.72rem;
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.03);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .trace-row.prio-HIGH { border-left: 3px solid var(--neon-amber); }
+        .trace-row.prio-CRITICAL, .trace-row.prio-DANGER { border-left: 3px solid var(--neon-red); }
+        .trace-row.prio-LOW { border-left: 3px solid var(--neon-green); }
+
+        .trace-time { color: var(--text-muted); font-size: 0.68rem; }
+        .trace-state { font-weight: 800; color: var(--neon-cyan); font-size: 0.7rem; }
+        .trace-inputs { color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .trace-speech { color: #fff; font-family: 'Outfit', sans-serif; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     </style>
 </head>
 <body>
@@ -976,6 +1024,22 @@
                             <span>Đầu ra giọng nói:</span>
                             <span class="fusion-metric-val" style="font-size: 0.68rem;" id="decisionVoiceEngine">Blaze TTS + QUEUE_ADD</span>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- NHẬT KÝ TRUY VẾT SUY LUẬN ĐA MÔ HÌNH -> CẢNH BÁO GIỌNG NÓI -->
+            <div class="fusion-trace-box">
+                <div class="fusion-trace-header">
+                    <span>📜 NHẬT KÝ TRUY VẾT LUỒNG SUY LUẬN (4 NHÁNH MODEL ➔ FUSION ➔ BLAZE TTS)</span>
+                    <span id="traceCountMeta">0 sự kiện đã ghi</span>
+                </div>
+                <div class="fusion-trace-list" id="fusionTraceList">
+                    <div class="trace-row prio-LOW">
+                        <span class="trace-time">--:--:--</span>
+                        <span class="trace-state">READY</span>
+                        <span class="trace-inputs">4 AI Models chờ tín hiệu camera từ điện thoại...</span>
+                        <span class="trace-speech">Hệ thống sẵn sàng dẫn đường giọng nói</span>
                     </div>
                 </div>
             </div>
@@ -1363,7 +1427,8 @@
                 }
             }
             if (branches.edgesam) {
-                document.getElementById('branchSamCount').innerText = `${branches.edgesam.refined_boxes || 0} mask`;
+                const samMasks = branches.edgesam.active_masks !== undefined ? branches.edgesam.active_masks : (branches.edgesam.refined_boxes || 0);
+                document.getElementById('branchSamCount').innerText = `${samMasks} mask`;
                 document.getElementById('branchSamDetail').innerText = branches.edgesam.detail || "Lọc độ sâu theo pixel mask";
             }
             if (branches.segformer_geo) {
@@ -1433,6 +1498,89 @@
                     trigBadge.innerText = `CHỐNG LẶP (${dt.since_last_speech_s || 0}s)`;
                     trigBadge.style.color = "var(--neon-cyan)";
                 }
+            }
+
+            appendFusionTraceLog(data, fs, lanes, dt);
+        }
+
+        const fusionTraceHistory = [];
+        let lastTraceKey = "";
+        let lastSpokenEventId = "";
+        let totalTraceEvents = 0;
+
+        // Ghi nhật ký mỗi lần máy trạng thái đổi hướng hoặc phát giọng nói để hội đồng dễ theo dõi chuỗi suy luận
+        function appendFusionTraceLog(data, fs, lanes, dt) {
+            const listEl = document.getElementById('fusionTraceList');
+            const metaEl = document.getElementById('traceCountMeta');
+            if (!listEl) return;
+
+            const guidance = data.guidance || {};
+            const speechText = (guidance.display_text || guidance.text || "").trim();
+            const stateCode = dt.state_code || fs.instant_action || "CLEAR";
+            const spokenNow = Boolean(dt.spoken_this_frame || (guidance.text && guidance.text.trim().length > 0));
+            const curKey = `${stateCode}|${speechText}`;
+            const spokenId = dt.last_speech_ts !== undefined ? `${dt.last_speech_ts}|${speechText}` : curKey;
+
+            if (spokenNow) {
+                if (spokenId === lastSpokenEventId && curKey === lastTraceKey) return;
+                lastSpokenEventId = spokenId;
+            } else if (curKey === lastTraceKey) {
+                return;
+            }
+            if (!speechText) return;
+            lastTraceKey = curKey;
+            totalTraceEvents += 1;
+
+            const nowStr = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+            const branches = fs.model_branches || {};
+            const yoloCnt = (branches.yolo11 && branches.yolo11.count) || 0;
+            const segCnt = (branches.segformer_geo && branches.segformer_geo.count) || 0;
+            const samMasks = (branches.edgesam && branches.edgesam.active_masks) || 0;
+            const lDist = lanes.left && lanes.left.clear_distance_m !== undefined ? lanes.left.clear_distance_m.toFixed(1) : "--";
+            const cDist = lanes.center && lanes.center.clear_distance_m !== undefined ? lanes.center.clear_distance_m.toFixed(1) : "--";
+            const rDist = lanes.right && lanes.right.clear_distance_m !== undefined ? lanes.right.clear_distance_m.toFixed(1) : "--";
+
+            const inputSummary = `YOLO:${yoloCnt} • Seg3D:${segCnt} • SAM:${samMasks} | T:${lDist}m G:${cDist}m P:${rDist}m`;
+            const prio = guidance.priority || "LOW";
+
+            fusionTraceHistory.unshift({
+                time: nowStr,
+                state: spokenNow ? `🔊 ${stateCode}` : stateCode,
+                inputs: inputSummary,
+                speech: speechText,
+                prio,
+            });
+            if (fusionTraceHistory.length > 6) {
+                fusionTraceHistory.pop();
+            }
+
+            listEl.replaceChildren();
+            fusionTraceHistory.forEach(entry => {
+                const row = document.createElement('div');
+                row.className = `trace-row prio-${entry.prio}`;
+
+                const tSpan = document.createElement('span');
+                tSpan.className = 'trace-time';
+                tSpan.textContent = entry.time;
+
+                const sSpan = document.createElement('span');
+                sSpan.className = 'trace-state';
+                sSpan.textContent = entry.state;
+
+                const iSpan = document.createElement('span');
+                iSpan.className = 'trace-inputs';
+                iSpan.textContent = entry.inputs;
+
+                const spSpan = document.createElement('span');
+                spSpan.className = 'trace-speech';
+                spSpan.textContent = `"${entry.speech}"`;
+
+                row.append(tSpan, sSpan, iSpan, spSpan);
+                listEl.appendChild(row);
+            });
+
+            if (metaEl) {
+                metaEl.textContent = `${totalTraceEvents} sự kiện đã ghi`;
             }
         }
 
