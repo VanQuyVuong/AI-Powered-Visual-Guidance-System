@@ -21,7 +21,7 @@ OBSTACLE_DANGER_M = 2.25    # Vật cản ở hành lang an toàn / làn giữa 
 SIDE_OBSTACLE_M = 1.65      # Vật cản ở 2 bên <= 1.65m
 
 ALERT_REPEAT_INTERVAL_S = 6.0   # Nhắc lại sau 6s nếu vẫn đứng trước vật cản
-CLEAR_REPEAT_INTERVAL_S = 10.0  # Nhắc lại "an toàn, đi thẳng" sau 10s
+CLEAR_REPEAT_INTERVAL_S = 6.5   # Nhắc lại "an toàn, đi thẳng" định kỳ mỗi 6.5s khi đang đi thẳng
 
 STEP_WORDS = ("bậc thềm", "bậc tam cấp", "cầu thang", "bậc thang", "ổ gà", "hố sụt", "hố sâu")
 GROUND_HAZARD_CLASSES = {"stairs", "step", "curb", "doorstep", "threshold", "pothole", "dropoff"}
@@ -38,6 +38,7 @@ def _initial_state() -> dict:
         "last_dist_m": 9.9,
         "clear_frames": 0,
         "blocked_frames": 0,
+        "pending_post_turn_reconfirm": False,
         "history": [],  # dùng bởi pipeline (chống rung tay)
     }
 
@@ -104,19 +105,30 @@ def assess_path(cur_text: str, all_objects: list, depth_lanes: Optional[dict], i
         if d > OBSTACLE_DANGER_M:
             return False
 
-        # 1. Hộp bao xâm lấn vào làn giữa (x1 < 0.65*W và x2 > 0.35*W)
+        pos = _get(o, "position")
         b = _box(o)
-        if b is not None:
-            bx1, bx2 = b
-            if bx1 < 0.65 * W and bx2 > 0.35 * W:
-                return True
 
-        # 2. Lọt vào hình thang hành lang an toàn 3D (ROI)
-        if _get(o, "in_roi") is True:
+        # 1. Nếu vật thể đã nằm lệch sang làn trái hoặc làn phải (tâm ở 1/3 trái hoặc 1/3 phải khung hình):
+        # chỉ coi là chắn ngang lối đi thẳng nếu hộp bao tràn sâu qua trục giữa (x1 < 0.58*W và x2 > 0.42*W).
+        # Nhờ đó, ngay khi người dùng vừa rẽ phải/trái làm vật cản dạt sang bên (dù in_roi ở đáy hình thang vẫn True),
+        # làn giữa lập tức được giải phóng để báo "Phía trước an toàn, đi thẳng."!
+        if pos in ("left", "right"):
+            if b is not None:
+                bx1, bx2 = b
+                return (bx1 < 0.58 * W) and (bx2 > 0.42 * W)
+            return False
+
+        # 2. Vị trí ở làn giữa (center)
+        if pos == "center":
             return True
 
-        # 3. Vị trí ở làn giữa
-        if _get(o, "position") == "center":
+        # 3. Dự phòng khi object không có trường position: kiểm tra hộp bao hoặc in_roi
+        if b is not None:
+            bx1, bx2 = b
+            if bx1 < 0.62 * W and bx2 > 0.38 * W:
+                return True
+
+        if _get(o, "in_roi") is True:
             return True
 
         return False
@@ -300,6 +312,12 @@ def update_spatial_scan_and_voice(
     last_sig = st["last_alert_sig"]
     last_dist = float(st.get("last_dist_m", 9.9))
 
+    # Nếu trước đó hệ thống vừa yêu cầu rẽ trái / rẽ phải / quay đầu (TURN_*) và người dùng đã rẽ xong
+    # khiến phía trước thông thoáng, ưu tiên xác nhận "Phía trước an toàn, đi thẳng." trước tiên!
+    was_turning_or_blocked = bool(last_sig and last_sig not in ("CLEAR", "ALLEY_CLEAR"))
+    if status == "ALLEY_CLEAR" and last_sig.startswith("TURN_"):
+        status = "CLEAR"
+
     target_text = ""
     target_prio = "HIGH"
     sig = f"{status}:{name}"
@@ -345,6 +363,7 @@ def update_spatial_scan_and_voice(
         min_step_interval = 0.0 if is_fresh_from_clear else 1.2
         if (last_sig != sig and since >= min_step_interval) or since >= ALERT_REPEAT_INTERVAL_S:
             should_speak = True
+            st["pending_post_turn_reconfirm"] = False
     elif status in ("TURN_LEFT", "TURN_RIGHT", "TURN_AROUND", "ALLEY_DRIFT_LEFT", "ALLEY_DRIFT_RIGHT"):
         # 1. Nếu chuyển từ CLEAR / ALLEY_CLEAR sang có vật cản nguy hiểm hoặc lệch sát tường hẻm -> Cảnh báo TỨC THÌ (0.0s, frame 1)!
         # 2. Nếu người dùng vẫn tiếp tục tiến sát vào vật cản đó đến mức nguy kịch (<= 0.85m, giảm >= 0.45m so với lúc báo trước)
@@ -359,16 +378,25 @@ def update_spatial_scan_and_voice(
             or since >= ALERT_REPEAT_INTERVAL_S
         ):
             should_speak = True
+            st["pending_post_turn_reconfirm"] = False
     elif status == "ALLEY_CLEAR":
         # Chế độ đi trong hẻm: Khi bắt đầu bước vào hẻm (last_sig != "ALLEY_CLEAR"), thông báo đúng 1 lần:
         # "Hai bên là bức tường dài, phía trước thông thoáng, bạn hãy đi thẳng."
         # Sau đó GIỮ IM LẶNG HOÀN TOÀN trong suốt quá trình đi thẳng trong hẻm, chỉ ngắt 0ms khi có vật cản phía trước!
-        if last_sig != "ALLEY_CLEAR" and since >= (0.0 if not last_sig else 1.2):
+        if last_sig != "ALLEY_CLEAR" and since >= (0.0 if not last_sig else 0.8):
             should_speak = True
+            st["pending_post_turn_reconfirm"] = False
     else:  # CLEAR
-        # Giữ hướng an toàn >= 2 frame và sau khoảng nghỉ hợp lý
-        if st["clear_frames"] >= 2 and since >= 1.5 and (last_sig != "CLEAR" or since >= CLEAR_REPEAT_INTERVAL_S):
+        # Nếu vừa rẽ trái/phải qua vật cản (was_turning_or_blocked): chỉ cần giữ hướng trống >= 2 frame và >= 0.75s
+        # là báo ngay "Phía trước an toàn, đi thẳng." để người khiếm thị yên tâm bước tiếp!
+        min_clear_interval = 0.75 if was_turning_or_blocked else 1.5
+        if st["clear_frames"] >= 2 and since >= min_clear_interval and (last_sig != "CLEAR" or since >= CLEAR_REPEAT_INTERVAL_S):
             should_speak = True
+            st["pending_post_turn_reconfirm"] = was_turning_or_blocked
+        elif st["clear_frames"] >= 2 and st.get("pending_post_turn_reconfirm") and since >= 2.4:
+            # Phát bù xác nhận an toàn sau 2.4s nếu lần phát đầu tiên ở 0.75s diễn ra lúc loa điện thoại đang đọc dở câu bảo rẽ
+            should_speak = True
+            st["pending_post_turn_reconfirm"] = False
 
     if should_speak:
         st["last_text"] = target_text

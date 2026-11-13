@@ -126,10 +126,10 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         else:
             dist_m = round(pinhole_dist, 1)
 
-        overlaps_center = (box["x1"] < 0.65 * img_width and box["x2"] > 0.35 * img_width)
-        # 3. Tiêu chí nguy hiểm chuẩn trong nhà: Chỉ cảnh báo khi vật cản tiến vào phạm vi <= 2.25m ở làn giữa (hoặc <= 1.65m ở hai bên).
-        # Tuyệt đối không cảnh báo nguy hiểm đối với ghế/bàn ở xa 3m - 5.5m!
-        in_path = in_corridor or (pos == "center") or overlaps_center or (box_h_ratio >= 0.28 and dist_m <= 2.25)
+        overlaps_center = (box["x1"] < 0.58 * img_width and box["x2"] > 0.42 * img_width)
+        # 3. Tiêu chí nguy hiểm chuẩn trong nhà: Chỉ cảnh báo chắn lối đi thẳng khi vật cản thực sự nằm ở làn giữa (hoặc tràn sâu vào trục giữa) và <= 2.25m.
+        # Khi người dùng đã rẽ phải/trái làm vật cản dạt sang bên (pos in left/right và không còn đè trục giữa), giải phóng in_path ngay!
+        in_path = (pos == "center") or overlaps_center or (in_corridor and pos == "center")
         is_danger = (in_path and dist_m <= 2.25) or (dist_m <= 1.65)
 
         # Chuẩn hóa confidence >= 0.40 cho các đồ vật nhỏ đã qua lọc
