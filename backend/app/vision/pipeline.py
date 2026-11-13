@@ -54,11 +54,41 @@ from app.vision.guided_scan import (  # noqa: E402
 )
 
 
+def _sync_navigation_with_decision(
+    nav_data: dict,
+    decision_telemetry: dict,
+    display_text: str,
+) -> dict:
+    """
+    Đồng bộ mũi tên điều hướng 3 làn (straight / left / right / stop) với kết luận cuối cùng
+    của Guided Scan State Machine để giao diện mũi tên và lời đọc giọng nói luôn nhất quán 100%.
+    """
+    state_code = str((decision_telemetry or {}).get("state_code", "CLEAR"))
+    mapping = {
+        "TURN_LEFT": ("left", "Rẽ trái"),
+        "ALLEY_DRIFT_RIGHT": ("left", "Chỉnh nhẹ sang trái"),
+        "TURN_RIGHT": ("right", "Rẽ phải"),
+        "ALLEY_DRIFT_LEFT": ("right", "Chỉnh nhẹ sang phải"),
+        "TURN_AROUND": ("stop", "Dừng lại / Quay đầu"),
+        "STEPS": ("stop", "Bước chậm / Chú ý dưới chân"),
+        "ALLEY_CLEAR": ("straight", "Đi thẳng trong hẻm"),
+        "CLEAR": ("straight", "Đi thẳng"),
+    }
+    if state_code in mapping:
+        direction, short_label = mapping[state_code]
+        nav_data["direction"] = direction
+        nav_data["text"] = short_label
+        if display_text:
+            nav_data["description"] = display_text
+    return nav_data
+
+
 def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
     """
     Toàn bộ phần xử lý nặng (YOLO + Depth Anything V2 + SegFormer + Geometric Hazard + Tactile Paving).
     Hàm đồng bộ chạy trong threadpool (asyncio.to_thread).
     """
+    t0 = time.perf_counter()
     if not image_bytes:
         raise ValueError("Không thể đọc được ảnh (INVALID_IMAGE)")
 
@@ -265,8 +295,9 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         now,
     )
     guidance_data["priority"] = cur_prio
+    decision_telem = get_decision_telemetry(now)
     if isinstance(nav_data.get("fusion_summary"), dict):
-        nav_data["fusion_summary"]["decision_telemetry"] = get_decision_telemetry(now)
+        nav_data["fusion_summary"]["decision_telemetry"] = decision_telem
 
     if should_speak_now:
         guidance_data["display_text"] = cur_text
@@ -277,6 +308,8 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
             guidance_data["text"] = ""
         else:
             guidance_data["text"] = cur_text
+
+    _sync_navigation_with_decision(nav_data, decision_telem, guidance_data.get("display_text", ""))
 
     # 9. Mã hóa frame_b64 và depth_b64 phục vụ xem trực tiếp trên web monitor (/view-phone)
     import base64
@@ -299,9 +332,12 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         except Exception:
             pass
 
+    processing_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+
     return {
         "success": True,
         "mode": get_mode(),
+        "processing_ms": processing_ms,
         "objects": all_objects,
         "has_person_in_roi": has_person_in_roi,
         "has_obstacle_in_roi": has_obstacle_in_roi,
