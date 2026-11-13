@@ -693,12 +693,29 @@
         let autoSamInterval = null;
         let is3DVideoPlaying = false;
 
-        // Âm thanh Web Speech API
-        function speakWeb(text) {
-            if (!document.getElementById('chkTtsWeb').checked) return;
+        let lastWebSpokenText = "";
+        let lastWebSpokenTime = 0;
+
+        // Âm thanh Web Speech API (hỗ trợ ngắt khẩn cấp khi gặp nguy hiểm và phát nối tiếp khi đã rẽ sang hướng an toàn)
+        function speakWeb(text, priority = "LOW") {
+            if (!text || !document.getElementById('chkTtsWeb').checked) return;
             if (!('speechSynthesis' in window)) return;
+            const now = Date.now();
+            const isSafe = text.toLowerCase().includes("an toàn") || text.toLowerCase().includes("thông thoáng");
+            const wasSafe = lastWebSpokenText.toLowerCase().includes("an toàn") || lastWebSpokenText.toLowerCase().includes("thông thoáng");
+            const isTransitionToSafe = isSafe && !wasSafe && lastWebSpokenText.length > 0;
+
+            if (text === lastWebSpokenText && (now - lastWebSpokenTime) < (isSafe ? 5500 : 2200)) {
+                return;
+            }
             try {
-                window.speechSynthesis.cancel();
+                // Nếu chuyển sang nguy hiểm hoặc từ an toàn sang vật cản -> ngắt ngay câu cũ;
+                // Nếu vừa rẽ xong chuyển sang "Phía trước an toàn, đi thẳng" -> xếp hàng đọc nối tiếp ngay sau câu rẽ!
+                if (!isTransitionToSafe) {
+                    window.speechSynthesis.cancel();
+                }
+                lastWebSpokenText = text;
+                lastWebSpokenTime = now;
                 const utter = new SpeechSynthesisUtterance(text);
                 utter.lang = 'vi-VN';
                 utter.rate = 1.05;
@@ -908,6 +925,9 @@
                     banner.className = `guidance-banner ${prio}`;
                     document.getElementById('guidanceText').innerText = text;
                     document.getElementById('guidanceMeta').innerText = `Mức độ: ${prio} • Chống lặp giọng nói thông minh`;
+                }
+                if (data.guidance.text) {
+                    speakWeb(data.guidance.text, prio);
                 }
 
                 let icon = "🛡️";
