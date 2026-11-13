@@ -441,4 +441,58 @@ def test_scenario_23_real_downward_granite_stairs_with_side_handrail(sim_env):
     assert stairs["is_danger"] is True
 
 
+def test_scenario_24_turn_right_after_obstacle_immediately_announces_safe_straight(sim_env):
+    """
+    Kịch bản 24: Khi hệ thống báo có vật cản và yêu cầu rẽ phải ('Phía trước có vật cản, hãy rẽ sang phải.'),
+    người dùng lập tức xoay người rẽ sang phải khiến vật cản dạt sang rìa bên trái (position='left', in_roi=True)
+    và lối đi phía trước đã thông thoáng -> Hệ thống PHẢI lập tức xác nhận 'Phía trước an toàn, đi thẳng.'
+    sau 0.8s (và nhắc bù xác nhận sau 2.4s nếu loa điện thoại vừa đọc xong câu bảo rẽ), tuyệt đối không im lặng!
+    """
+    _, _, W, _ = sim_env
+
+    # Bước 1 (t = 300.0s): Vật cản chắn lối đi hơi lệch trái -> Báo rẽ sang phải
+    obs_front_left = [{
+        "class_name": "obstacle", "class_name_vn": "vật cản", "confidence": 0.88,
+        "position": "center", "distance_m": 1.3, "in_roi": True, "is_danger": True,
+        "bounding_box": {"x1": 110, "y1": 150, "x2": 360, "y2": 450},
+    }]
+    lanes_blocked = {
+        "has_depth": True,
+        "lanes": {
+            "left": {"median_m": 1.2, "is_blocked": True},
+            "center": {"median_m": 1.3, "is_blocked": True},
+            "right": {"median_m": 3.6, "is_blocked": False},
+        },
+    }
+    speech_turn, prio_turn, speak_turn = update_spatial_scan_and_voice(
+        "Phía trước có vật cản.", "HIGH", obs_front_left, lanes_blocked, W, 300.0
+    )
+    assert speak_turn is True
+    assert speech_turn == "Phía trước có vật cản, hãy rẽ sang phải."
+    assert prio_turn == "HIGH"
+
+    # Bước 2 (t = 300.4s & t = 300.8s): Người dùng rẽ phải xong -> Vật cản dạt hẳn sang bên trái (x1=15, x2=220, position='left'),
+    # phía trước (center) thông thoáng 3.8m -> Hệ thống lập tức báo "Phía trước an toàn, đi thẳng." ở 300.8s!
+    obs_shifted_left = [{
+        "class_name": "obstacle", "class_name_vn": "vật cản", "confidence": 0.85,
+        "position": "left", "distance_m": 1.35, "in_roi": True, "is_danger": True,
+        "bounding_box": {"x1": 15, "y1": 160, "x2": 220, "y2": 450},
+    }]
+    lanes_after_turn = {
+        "has_depth": True,
+        "lanes": {
+            "left": {"median_m": 1.35, "is_blocked": False},
+            "center": {"median_m": 3.80, "is_blocked": False},
+            "right": {"median_m": 3.50, "is_blocked": False},
+        },
+    }
+    update_spatial_scan_and_voice("Bên trái có vật cản.", "MEDIUM", obs_shifted_left, lanes_after_turn, W, 300.4)
+    speech_clear, prio_clear, speak_clear = update_spatial_scan_and_voice(
+        "Bên trái có vật cản.", "MEDIUM", obs_shifted_left, lanes_after_turn, W, 300.8
+    )
+    assert speak_clear is True
+    assert speech_clear == "Phía trước an toàn, đi thẳng."
+    assert prio_clear == "LOW"
+
+
 
