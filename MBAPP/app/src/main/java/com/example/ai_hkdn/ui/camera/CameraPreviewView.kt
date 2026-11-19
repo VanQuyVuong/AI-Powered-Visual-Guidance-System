@@ -28,15 +28,19 @@ import java.util.concurrent.Executors
 @Composable
 fun CameraPreviewView(
     isStreaming: Boolean,
+    useEdgeBitmap: Boolean = true,
     canProcessFrame: () -> Boolean = { true },
     onFrameCaptured: (ByteArray, String) -> Unit,
+    onEdgeBitmapCaptured: (android.graphics.Bitmap) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    val currentUseEdgeBitmap by rememberUpdatedState(useEdgeBitmap)
     val currentCanProcessFrame by rememberUpdatedState(canProcessFrame)
     val currentOnFrameCaptured by rememberUpdatedState(onFrameCaptured)
+    val currentOnEdgeBitmapCaptured by rememberUpdatedState(onEdgeBitmapCaptured)
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     val previewView = remember {
         PreviewView(context).apply {
@@ -50,7 +54,7 @@ fun CameraPreviewView(
         }
     }
 
-    LaunchedEffect(isStreaming) {
+    LaunchedEffect(isStreaming, useEdgeBitmap) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
             val cameraProvider = cameraProviderFuture.get()
@@ -60,9 +64,11 @@ fun CameraPreviewView(
                 cameraProvider = cameraProvider,
                 previewView = previewView,
                 isStreaming = isStreaming,
+                useEdgeBitmap = { currentUseEdgeBitmap },
                 canProcessFrame = { currentCanProcessFrame() },
                 executor = cameraExecutor,
-                onFrameCaptured = { bytes, b64 -> currentOnFrameCaptured(bytes, b64) }
+                onFrameCaptured = { bytes, b64 -> currentOnFrameCaptured(bytes, b64) },
+                onEdgeBitmapCaptured = { bmp -> currentOnEdgeBitmapCaptured(bmp) }
             )
         }, ContextCompat.getMainExecutor(context))
     }
@@ -79,9 +85,11 @@ private fun bindCameraUseCases(
     cameraProvider: ProcessCameraProvider,
     previewView: PreviewView,
     isStreaming: Boolean,
+    useEdgeBitmap: () -> Boolean,
     canProcessFrame: () -> Boolean,
     executor: java.util.concurrent.ExecutorService,
-    onFrameCaptured: (ByteArray, String) -> Unit
+    onFrameCaptured: (ByteArray, String) -> Unit,
+    onEdgeBitmapCaptured: (android.graphics.Bitmap) -> Unit
 ) {
     val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
     val displayRotation = previewView.display?.rotation ?: android.view.Surface.ROTATION_0
@@ -94,7 +102,7 @@ private fun bindCameraUseCases(
             it.setSurfaceProvider(previewView.surfaceProvider)
         }
 
-    // Khóa độ phân giải tối ưu 480x640 (tỷ lệ 4:3) và chỉ nén JPEG khi server sẵn sàng nhận frame mới
+    // Khóa độ phân giải tối ưu 480x640 (tỷ lệ 4:3) và chỉ trích xuất khung hình khi bộ xử lý sẵn sàng
     val imageAnalysis = ImageAnalysis.Builder()
         .setTargetResolution(Size(480, 640))
         .setTargetRotation(displayRotation)
@@ -105,10 +113,17 @@ private fun bindCameraUseCases(
     imageAnalysis.setAnalyzer(executor) { imageProxy: ImageProxy ->
         try {
             if (isStreaming && canProcessFrame()) {
-                val jpegBytes = ImageUtils.imageProxyToJpegBytes(imageProxy, quality = 68)
-                if (jpegBytes != null) {
-                    val base64 = ImageUtils.jpegBytesToBase64(jpegBytes)
-                    onFrameCaptured(jpegBytes, base64)
+                if (useEdgeBitmap()) {
+                    val bmp = ImageUtils.imageProxyToRotatedBitmap(imageProxy, maxSide = 640)
+                    if (bmp != null) {
+                        onEdgeBitmapCaptured(bmp)
+                    }
+                } else {
+                    val jpegBytes = ImageUtils.imageProxyToJpegBytes(imageProxy, quality = 68)
+                    if (jpegBytes != null) {
+                        val base64 = ImageUtils.jpegBytesToBase64(jpegBytes)
+                        onFrameCaptured(jpegBytes, base64)
+                    }
                 }
             }
         } catch (e: Exception) {

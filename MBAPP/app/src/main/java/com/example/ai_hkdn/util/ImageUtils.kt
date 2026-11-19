@@ -11,15 +11,13 @@ import java.io.ByteArrayOutputStream
 object ImageUtils {
 
     /**
-     * Chuyển đổi ImageProxy trực tiếp từ RAM thành mảng byte JPEG
-     * - Xoay đúng chiều theo cảm biến máy ảnh (rotationDegrees)
-     * - Nén JPEG ở chất lượng 70% để giảm kích thước xuống ~30KB (truyền mạng <10ms)
+     * Chuyển đổi ImageProxy trực tiếp từ RAM thành Bitmap xoay đúng chiều (Zero-Disk I/O)
+     * phục vụ suy luận NPU/ONNX trực tiếp trên thiết bị không tốn chi phí nén JPEG.
      */
     @OptIn(ExperimentalGetImage::class)
-    fun imageProxyToJpegBytes(imageProxy: ImageProxy, quality: Int = 68, maxSide: Int = 640): ByteArray? {
+    fun imageProxyToRotatedBitmap(imageProxy: ImageProxy, maxSide: Int = 640): Bitmap? {
         return try {
             val bitmap = imageProxy.toBitmap()
-
             val rotationDegrees = imageProxy.imageInfo.rotationDegrees
             val rotatedBitmap = if (rotationDegrees != 0) {
                 val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
@@ -30,9 +28,8 @@ object ImageUtils {
                 bitmap
             }
 
-            // Đảm bảo cạnh dài không vượt quá maxSide (640px) để gói gửi qua Wi-Fi luôn ~20-35KB
             val longest = maxOf(rotatedBitmap.width, rotatedBitmap.height)
-            val finalBitmap = if (longest > maxSide) {
+            if (longest > maxSide) {
                 val scale = maxSide.toFloat() / longest.toFloat()
                 val nw = (rotatedBitmap.width * scale).toInt().coerceAtLeast(32)
                 val nh = (rotatedBitmap.height * scale).toInt().coerceAtLeast(32)
@@ -42,7 +39,20 @@ object ImageUtils {
             } else {
                 rotatedBitmap
             }
+        } catch (e: Exception) {
+            null
+        }
+    }
 
+    /**
+     * Chuyển đổi ImageProxy trực tiếp từ RAM thành mảng byte JPEG
+     * - Xoay đúng chiều theo cảm biến máy ảnh (rotationDegrees)
+     * - Nén JPEG ở chất lượng 70% để giảm kích thước xuống ~30KB (truyền mạng <10ms)
+     */
+    @OptIn(ExperimentalGetImage::class)
+    fun imageProxyToJpegBytes(imageProxy: ImageProxy, quality: Int = 68, maxSide: Int = 640): ByteArray? {
+        return try {
+            val finalBitmap = imageProxyToRotatedBitmap(imageProxy, maxSide = maxSide) ?: return null
             val outputStream = ByteArrayOutputStream()
             finalBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
             finalBitmap.recycle()
