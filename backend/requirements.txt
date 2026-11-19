@@ -12,6 +12,9 @@ pydantic
 websockets
 pytest
 onnxruntime
+onnx
+onnxscript
+onnxconverter-common
 requests
 python-dotenv
 # OCR (tùy chọn): pip install easyocr
