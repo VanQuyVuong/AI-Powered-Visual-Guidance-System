@@ -38,11 +38,17 @@ if not model_file:
 print(f"Đang khởi tạo model YOLO: {model_file}...")
 model = YOLO(model_file)
 
+from app.vision.model_scheduler import configure_cpu_threads
+
 # Tự động dùng GPU (CUDA) nếu có -> nhanh gấp nhiều lần CPU
+# Khi chạy CPU đa mô hình song song, configure_cpu_threads() giữ 1/2 số logical cores (tối đa 6)
 try:
     import torch
     DEVICE = 0 if torch.cuda.is_available() else "cpu"
+    if DEVICE == "cpu":
+        configure_cpu_threads()
 except Exception:
+    torch = None
     DEVICE = "cpu"
 USE_HALF = (DEVICE != "cpu")
 DEFAULT_IMGSZ = 480 if DEVICE != "cpu" else 416
@@ -81,8 +87,12 @@ def run_inference(image_or_bytes, imgsz: int = DEFAULT_IMGSZ):
     img = _ensure_bgr_frame(image_or_bytes)
     height, width, _ = img.shape
 
-    # Chạy YOLO inference ở độ phân giải tối ưu DEFAULT_IMGSZ (416 trên CPU)
-    results = model(img, verbose=False, device=DEVICE, imgsz=imgsz, **extra_kw)
+    # Chạy YOLO inference ở độ phân giải tối ưu DEFAULT_IMGSZ (416 trên CPU) dưới torch.inference_mode()
+    if torch is not None:
+        with torch.inference_mode():
+            results = model(img, verbose=False, device=DEVICE, imgsz=imgsz, **extra_kw)
+    else:
+        results = model(img, verbose=False, device=DEVICE, imgsz=imgsz, **extra_kw)
 
     detections = []
     for result in results:
@@ -116,9 +126,14 @@ def run_tracking(image_or_bytes, imgsz: int = DEFAULT_IMGSZ):
     img = _ensure_bgr_frame(image_or_bytes)
     height, width, _ = img.shape
 
-    # Chạy YOLO Tracking với ngưỡng tin cậy conf=0.25 để bắt nhạy ghế, chai nước, cặp sách, bàn
-    results = model.track(img, persist=True, tracker="bytetrack.yaml", verbose=False, conf=0.25,
-                          device=DEVICE, imgsz=imgsz, **extra_kw)
+    # Chạy YOLO Tracking với ngưỡng tin cậy conf=0.25 dưới torch.inference_mode() để giảm overhead CPU
+    if torch is not None:
+        with torch.inference_mode():
+            results = model.track(img, persist=True, tracker="bytetrack.yaml", verbose=False, conf=0.25,
+                                  device=DEVICE, imgsz=imgsz, **extra_kw)
+    else:
+        results = model.track(img, persist=True, tracker="bytetrack.yaml", verbose=False, conf=0.25,
+                              device=DEVICE, imgsz=imgsz, **extra_kw)
 
     detections = []
     for result in results:
