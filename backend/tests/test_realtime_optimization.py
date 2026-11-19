@@ -212,3 +212,97 @@ def test_guided_scan_rapid_urgent_reroute_and_fast_post_turn_recovery():
     update_spatial_scan_and_voice("", "LOW", [], lanes_clear, w, 10.6)
     sp3, prio3, ok3 = update_spatial_scan_and_voice("", "LOW", [], lanes_clear, w, 10.95)
     assert ok3 is True and sp3 == "Phía trước an toàn, đi thẳng." and prio3 == "LOW"
+
+
+def test_distance_calibration_portrait_chair_4_to_5_tiles():
+    """
+    Ghế ngoài đời cách 4-5 viên gạch (~2.6m - 3.0m) trên khung hình dọc điện thoại 480x640:
+    - Pinhole KHÔNG được phép bóp trần xuống 2.0m khi box_h > 25%.
+    - Nếu Depth Anything V2 bị kéo tụt xuống ~1.8m (do sàn trước mặt hoặc sai scale),
+      `resolve_calibrated_distance` phải giữ được >= 2.4m để không báo vật cản giả ở xa.
+    """
+    from app.vision.distance_estimator import estimate_distance_m, resolve_calibrated_distance
+
+    w, h = 480, 640
+    # Chiếc ghế cách ~2.7m trên camera dọc (cao ~164px ~ 25.6% khung hình, chân y2=450)
+    far_chair_box = {"x1": 165, "y1": 286, "x2": 315, "y2": 450}
+    pin_d = estimate_distance_m("chair", far_chair_box, w, h)
+    assert pin_d >= 2.5
+
+    # Ngay cả khi Depth V2 đoán non còn 1.8m -> sau hòa giải vẫn >= 2.4m (vượt ngưỡng nguy hiểm 2.25m)
+    calibrated = resolve_calibrated_distance("chair", metric_dist=1.8, pinhole_dist=pin_d, box=far_chair_box, img_w=w, img_h=h)
+    assert calibrated >= 2.4
+
+    # Còn nếu ghế thật sự đứng sát ở 1.2m (cao 365px, chạm gần đáy ảnh) -> phải giữ khoảng cách gần để báo ngay
+    near_chair_box = {"x1": 90, "y1": 245, "x2": 390, "y2": 610}
+    pin_near = estimate_distance_m("chair", near_chair_box, w, h)
+    cal_near = resolve_calibrated_distance("chair", metric_dist=1.2, pinhole_dist=pin_near, box=near_chair_box, img_w=w, img_h=h)
+    assert cal_near <= 1.4
+
+
+def test_images_folder_evaluator_helpers():
+    import evaluate_images_folder as ev
+
+    assert ev.parse_true_distance_m("ghe_2.8m.jpg") == 2.8
+    assert ev.parse_true_distance_m("cauthang_1,5m.png") == 1.5
+    assert ev.parse_true_distance_m("sample.jpg") is None
+
+    verdict, _ = ev.evaluate_category(
+        "vat_can_xa",
+        {"objects": [{"class_name": "chair", "distance_m": 2.7, "is_danger": False}], "navigation": {}},
+        true_dist_m=2.8,
+    )
+    assert verdict == "PASS"
+
+
+def test_depth_service_pothole_mirror_and_floor_filtering():
+    """Kiểm tra lọc ổ gà theo SegFormer, đo khoảng cách mép gần ổ gà, phát hiện gương và chặn báo nhầm nền gạch."""
+    import threading
+    from types import SimpleNamespace
+    import numpy as np
+    from app.vision.depth_service import DepthService
+    from app.vision.decision_engine import get_vietnamese_name
+
+    svc = DepthService.__new__(DepthService)
+    svc._lock = threading.Lock()
+    svc.is_loaded = True
+    svc.seg_loaded = True
+    svc.pothole_model = None
+    svc._latest_depth_map = None
+    svc._latest_seg_hazards_norm = []
+    svc._latest_potholes = []
+    # ADE20K ids: 3=floor, 53=stairs, 27=mirror, 91=earth, 0=wall
+    svc.seg_model = SimpleNamespace(
+        config=SimpleNamespace(id2label={0: "wall", 3: "floor", 21: "water", 27: "mirror", 53: "stairs", 91: "earth"})
+    )
+
+    h, w = 480, 640
+    # 1. Đo khoảng cách ổ gà ở mép gần phía dưới (tránh bị nền đường 4.5m ở nửa trên hộp kéo xa)
+    dmap = np.linspace(5.0, 1.4, h, dtype=np.float32)[:, None] * np.ones((1, w), dtype=np.float32)
+    ph_dist = svc._estimate_pothole_distance(10, int(h * 0.30), 630, h, dmap, w, h)
+    assert ph_dist <= 2.0
+
+    # 2. Lọc hộp ổ gà giả nằm trên cầu thang (seg=stairs) vs giữ ổ gà trên đường đất (seg=earth)
+    seg_stairs = np.full((64, 64), 53, dtype=np.int32)
+    assert svc._is_valid_pothole_box(10, int(h * 0.50), 600, h, w, h, seg_stairs) is False
+    seg_earth = np.full((64, 64), 91, dtype=np.int32)
+    assert svc._is_valid_pothole_box(10, int(h * 0.50), 600, h, w, h, seg_earth) is True
+
+    # 3. Chặn báo giả cầu thang khi vùng hộp thực chất toàn nền gạch phẳng (seg=floor)
+    svc._latest_seg_map = np.full((64, 64), 3, dtype=np.int32)
+    fake_stairs = {"class_name": "stairs", "bounding_box": {"x1": 60, "y1": 220, "x2": 580, "y2": 450}}
+    assert svc._is_stairs_suppressed_by_floor_seg(fake_stairs, w, h) is True
+
+    # 4. Nhận diện tấm gương lớn dù bên trong gương DepthV2 đo sâu tới 5.5m
+    seg_mirror = np.zeros((64, 64), dtype=np.int32)  # 0=wall
+    seg_mirror[8:58, 14:50] = 27  # mirror (~43% khung hình)
+    depth_small = np.full((64, 64), 1.6, dtype=np.float32)
+    depth_small[10:56, 16:48] = 5.5  # phản chiếu phòng sâu bên trong gương
+    hazards = svc._extract_seg_hazards_normalized(seg_mirror, depth_small)
+    mirror_objs = [o for o in hazards if o["class_name"] == "mirror"]
+    assert len(mirror_objs) == 1
+    assert mirror_objs[0]["distance_m"] <= 1.7
+    assert mirror_objs[0]["is_danger"] is True
+    assert get_vietnamese_name("mirror") == "tấm gương"
+
+
