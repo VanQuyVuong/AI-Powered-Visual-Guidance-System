@@ -276,8 +276,8 @@ class GeometricHazardDetector:
         horizontal_edges = cv2.morphologyEx(horiz_mask, cv2.MORPH_CLOSE, kernel_close)
 
         # 3. Dò các đoạn thẳng gờ bậc bằng HoughLinesP
-        min_line_len = max(20, int(w * 0.28 * scale))
-        hough_thresh = max(18, int(round(32 * scale)))
+        min_line_len = max(20, int(w * 0.25 * scale))
+        hough_thresh = max(16, int(round(28 * scale)))
         max_gap = max(8, int(round(22 * scale)))
         lines = cv2.HoughLinesP(
             horizontal_edges,
@@ -297,7 +297,7 @@ class GeometricHazardDetector:
                     continue
                 lx1, ly1, lx2, ly2 = int(pts[0]), int(pts[1]), int(pts[2]), int(pts[3])
                 angle = np.abs(np.arctan2(ly2 - ly1, lx2 - lx1) * 180.0 / np.pi)
-                if angle <= 14.0:
+                if angle <= 15.0:
                     full_x1 = gx1 + int(round(min(lx1, lx2) * inv_scale))
                     full_x2 = gx1 + int(round(max(lx1, lx2) * inv_scale))
                     full_y = gy1 + int(round(((ly1 + ly2) / 2.0) * inv_scale))
@@ -314,8 +314,8 @@ class GeometricHazardDetector:
         if not valid_horizontal_lines:
             return None
 
-        # Gom nhóm các cạnh ngang cách nhau <= 26px (theo ảnh gốc) thành 1 bậc duy nhất
-        cluster_gap = 26.0 * scale
+        # Gom nhóm các cạnh ngang cách nhau <= 12px (theo ảnh gốc) để không gộp nhầm nhiều bậc thang hẹp thành 1 cụm
+        cluster_gap = 12.0 * scale
         valid_horizontal_lines.sort(key=lambda item: item["y_avg"])
         clusters: List[Dict[str, float]] = []
         for line in valid_horizontal_lines:
@@ -331,11 +331,11 @@ class GeometricHazardDetector:
                 c["y_avg"] = (c["y_avg"] + line["y_avg"]) / 2.0
                 c["x1"] = min(c["x1"], float(line["x1"]))
                 c["x2"] = max(c["x2"], float(line["x2"]))
-                c["max_len"] = max(c["max_len"], float(c["x2"] - c["x1"]))
+                c["max_len"] = max(c["max_len"], float(line["x2"] - c["x1"]))
 
         clustered_y = [c["y_avg"] for c in clusters]
         max_span_px = max((c["x2"] - c["x1"]) for c in clusters) * inv_scale
-        if max_span_px < w * 0.28:
+        if max_span_px < w * 0.25:
             return None
 
         # 4. Phân tích kết hợp Bước nhảy độ sâu 3D & Hồ sơ quang học bậc thang thực tế
@@ -399,15 +399,17 @@ class GeometricHazardDetector:
             and ((top_z - bot_z) >= 0.28)
         )
 
+        # Chống báo nhầm lưới ron gạch nền phẳng / tường ốp gạch: luôn yêu cầu cạnh dọc thấp hơn rõ cạnh ngang (<= 48%)
         has_real_multistep_pattern = (
             len(clustered_y) >= 3
-            and vertical_span >= 75
+            and vertical_span >= 65
             and p90_p10 >= 22.0
             and optical_jumps >= 2
+            and (vert_px <= horiz_px * 0.48)
             and (
                 std_z >= 0.20
                 or abs(top_z - bot_z) >= 0.22
-                or (p90_p10 >= 40.0 and vert_px <= horiz_px * 0.65)
+                or p90_p10 >= 40.0
             )
         )
 
@@ -426,15 +428,16 @@ class GeometricHazardDetector:
         stair_depth_roi = roi_depth[max(0, step_min_y):min(roi_depth.shape[0], step_max_y + pad_tail), :]
         stair_dist = round(float(np.median(stair_depth_roi)), 1) if stair_depth_roi.size > 0 else 1.5
 
-        # Khi đứng ngay đầu cầu thang đi xuống/đi lên thực tế (bậc dưới cùng nằm sát chân ảnh by2 >= 62% chiều cao ảnh),
-        # chuẩn hóa khoảng cách về <= 1.6m để cảnh báo tức thì dù Depth-Anything-V2 đo sâu xuống đáy cầu thang (3.2m - 4.2m)
-        if has_real_multistep_pattern and by2 >= int(h * 0.62) and stair_dist > 1.8:
+        # Khi đứng ngay đầu cầu thang thực tế (bậc dưới cùng sát chân ảnh by2 >= 62% chiều cao ảnh),
+        # Depth Anything V2 Indoor thường kéo sâu bậc thang ngoài trời lên 5m - 9m -> chuẩn hóa về 1.5m khi cấu trúc ngang rõ
+        max_clamp_d = 9.5 if (vert_px <= horiz_px * 0.35 or max_net_jump >= 0.40) else 4.8
+        if has_real_multistep_pattern and by2 >= int(h * 0.62) and 1.8 < stair_dist <= max_clamp_d:
             stair_dist = 1.5
 
         if stair_dist > 3.2 or stair_dist < 0.35:
             return None
 
-        if len(clustered_y) >= 3 and vertical_span >= 75 and (depth_jumps >= 2 or has_real_multistep_pattern):
+        if len(clustered_y) >= 3 and vertical_span >= 65 and (depth_jumps >= 2 or has_real_multistep_pattern):
             name_vn = "cầu thang"
             class_name = "stairs"
         elif len(clustered_y) == 2 and vertical_span >= 45 and depth_jumps >= 2:
