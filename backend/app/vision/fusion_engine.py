@@ -116,64 +116,65 @@ class MultiModelFusionEngine:
           - fused_objects: Danh sách vật cản đã làm sạch và đồng bộ khoảng cách
           - fusion_summary: Báo cáo tổng hợp 3 làn và quyết định điều hướng tức thì
         """
+        t_fusion0 = time.perf_counter()
         ts = now if now is not None else time.time()
-        # Dọn các track đã quá hạn
-        self._temporal_tracks = {
-            k: v for k, v in self._temporal_tracks.items() if (ts - v[0]) <= self.memory_ttl_s
-        }
+        # Dọn các track đã quá hạn trực tiếp (tránh tạo dict thừa nếu chưa có track hết hạn)
+        if self._temporal_tracks:
+            expired = [k for k, v in self._temporal_tracks.items() if (ts - v[0]) > self.memory_ttl_s]
+            for k in expired:
+                del self._temporal_tracks[k]
 
-        # 1. Gom tất cả ứng viên và gắn nhãn nguồn (source_model) + độ ưu tiên ngữ nghĩa
-        candidates: List[Dict[str, Any]] = []
-        for obj in (yolo_objects or []):
-            item = dict(obj)
-            item.setdefault("source_model", "YOLO11+DepthV2+EdgeSAM")
-            candidates.append(item)
+        # 1. Gom & tiền chỉ mục tọa độ (tuple số thực phẳng) để loại trùng O(N^2) siêu nhanh (< 0.3ms)
+        indexed_candidates: List[Tuple[int, float, float, float, float, float, str, int, Dict[str, Any]]] = []
+        # Tuple: (-prio, dist, x1, y1, x2, y2, area, cname, prio, item_dict) -> giữ đơn giản 9 phần tử:
+        # (sort_neg_prio, sort_dist, x1, y1, x2, y2, area, cname, item)
+        def _pack(src_list, default_source: str):
+            for raw in (src_list or ()):
+                item = dict(raw)
+                item.setdefault("source_model", default_source)
+                cname = str(item.get("class_name", "")).lower()
+                prio = SEMANTIC_PRIORITY.get(cname, 60)
+                d_val = item.get("distance_m")
+                dist = float(d_val) if d_val is not None else 9.9
+                b = item.get("bounding_box") or {}
+                x1 = float(b.get("x1", 0))
+                y1 = float(b.get("y1", 0))
+                x2 = float(b.get("x2", 0))
+                y2 = float(b.get("y2", 0))
+                area = max(1.0, (x2 - x1) * (y2 - y1)) if (x2 > x1 and y2 > y1) else 1.0
+                indexed_candidates.append((-prio, dist, x1, y1, x2, y2, area, cname, item))
 
-        for hz in (structural_hazards or []):
-            item = dict(hz)
-            item.setdefault("source_model", "SegFormer+Geometric3D")
-            candidates.append(item)
+        _pack(yolo_objects, "YOLO11+DepthV2+EdgeSAM")
+        _pack(structural_hazards, "SegFormer+Geometric3D")
+        _pack(sam_obstacles, "EdgeSAM+DepthV2")
 
-        for sam_obj in (sam_obstacles or []):
-            item = dict(sam_obj)
-            item.setdefault("source_model", "EdgeSAM+DepthV2")
-            candidates.append(item)
+        indexed_candidates.sort(key=lambda t: (t[0], t[1]))
 
-        # Sắp xếp ứng viên theo:
-        # 1) Độ ưu tiên ngữ nghĩa giảm dần (vật thể cụ thể ưu tiên hơn tường/vật cản chung)
-        # 2) Khoảng cách gần hơn ưu tiên trước
-        def _sort_key(o: Dict[str, Any]):
-            cname = str(o.get("class_name", "")).lower()
-            prio = SEMANTIC_PRIORITY.get(cname, 60)
-            dist = float(o.get("distance_m") if o.get("distance_m") is not None else 9.9)
-            return (-prio, dist)
-
-        candidates.sort(key=_sort_key)
-
-        # 2. Khử trùng lặp không gian đa mô hình (Cross-Model Spatial Deduplication)
+        # 2. Khử trùng lặp không gian đa mô hình (Cross-Model Spatial Deduplication với AABB Early-Skip)
         fused: List[Dict[str, Any]] = []
+        kept_meta: List[Tuple[float, float, float, float, float, int]] = []  # (x1, y1, x2, y2, area, prio)
         has_specific_center_hazard = False
 
-        for cand in candidates:
-            c_name = str(cand.get("class_name", "")).lower()
-            c_box = cand.get("bounding_box", {})
-            c_prio = SEMANTIC_PRIORITY.get(c_name, 60)
+        for neg_prio, _, ax1, ay1, ax2, ay2, area_a, c_name, cand in indexed_candidates:
+            c_prio = -neg_prio
 
-            # Nếu đã có vật cản cụ thể (ghế, bàn, cột nhà, cầu thang) ở làn giữa thì loại bỏ nhãn "wall"/"obstacle" chung chung đè lên
             if c_name in ("wall", "obstacle") and has_specific_center_hazard:
                 continue
 
             is_duplicate = False
-            for kept in fused:
-                k_name = str(kept.get("class_name", "")).lower()
-                k_box = kept.get("bounding_box", {})
-                k_prio = SEMANTIC_PRIORITY.get(k_name, 60)
-
-                overlap = compute_iou(c_box, k_box)
-                # Nếu 2 phát hiện trùng vùng không gian (overlap >= 0.35), giữ lại nhãn có độ ưu tiên ngữ nghĩa cao hơn
-                if overlap >= 0.35 and k_prio >= c_prio:
-                    is_duplicate = True
-                    break
+            if ax2 > ax1 and ay2 > ay1:
+                for bx1, by1, bx2, by2, area_b, k_prio in kept_meta:
+                    if k_prio < c_prio:
+                        continue
+                    # Fast AABB rejection: bỏ qua ngay nếu 2 hộp không chạm nhau theo trục X hoặc Y
+                    if ax2 <= bx1 or bx2 <= ax1 or ay2 <= by1 or by2 <= ay1:
+                        continue
+                    inter = (min(ax2, bx2) - max(ax1, bx1)) * (min(ay2, by2) - max(ay1, by1))
+                    union = area_a + area_b - inter
+                    overlap = max(inter / max(1.0, union), (inter / min(area_a, area_b)) * 0.65)
+                    if overlap >= 0.35:
+                        is_duplicate = True
+                        break
 
             if is_duplicate:
                 continue
@@ -188,7 +189,6 @@ class MultiModelFusionEngine:
             if smoothed_d is not None:
                 cand["distance_m"] = smoothed_d
 
-            # Chuẩn hóa lại cờ is_danger sau khi làm mượt khoảng cách
             dist_val = float(cand.get("distance_m") if cand.get("distance_m") is not None else 9.9)
             pos_val = str(cand.get("position", "center"))
             if c_name == "wall":
@@ -207,6 +207,10 @@ class MultiModelFusionEngine:
                 has_specific_center_hazard = True
 
             fused.append(cand)
+            if ax2 > ax1 and ay2 > ay1:
+                kept_meta.append((ax1, ay1, ax2, ay2, area_a, c_prio))
+
+        raw_candidate_count = len(indexed_candidates)
 
         # 4. Tổng hợp trạng thái 3 làn (Trái - Giữa - Phải) & Quyết định điều hướng tức thì
         lanes_raw = (depth_lanes or {}).get("lanes", {}) if depth_lanes else {}
@@ -255,16 +259,18 @@ class MultiModelFusionEngine:
             sam_mask_count=sam_mask_count,
         )
         danger_count = sum(1 for o in fused if o.get("is_danger"))
+        fusion_latency_ms = round((time.perf_counter() - t_fusion0) * 1000.0, 2)
 
         return {
             "fused_objects": fused,
             "fusion_summary": {
                 "active_models": ["YOLO11", "DepthAnythingV2", "EdgeSAM", "SegFormer+Geometric3D"],
-                "raw_candidate_count": len(candidates),
+                "raw_candidate_count": raw_candidate_count,
                 "fused_obstacle_count": len(fused),
                 "danger_obstacle_count": danger_count,
-                "dedup_removed_count": max(0, len(candidates) - len(fused)),
+                "dedup_removed_count": max(0, raw_candidate_count - len(fused)),
                 "ema_active_tracks": len(self._temporal_tracks),
+                "fusion_latency_ms": fusion_latency_ms,
                 "model_branches": model_branches,
                 "lane_clearance": lane_clearance,
                 "instant_action": instant_action,
