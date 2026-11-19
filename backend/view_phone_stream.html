@@ -1409,11 +1409,19 @@
             const branches = fs.model_branches || {};
             const lanes = fs.lane_clearance || {};
             const dt = fs.decision_telemetry || {};
+            const isEdgeMode = String(data.mode || "").startsWith("EDGE");
 
             // Bước 1: 4 Nhánh Model AI
             const headerMeta = document.getElementById('fusionHeaderMeta');
             if (headerMeta && fs.fusion_latency_ms !== undefined) {
-                headerMeta.innerText = `4 AI Models Active • IoU Deduplication • EMA Smoothing • Fusion: ${fs.fusion_latency_ms}ms`;
+                const modePrefix = isEdgeMode
+                    ? `📱 ON-DEVICE NPU (${data.device || 'Redmi Edge'})`
+                    : '💻 LAPTOP AI SERVER';
+                headerMeta.innerText = `${modePrefix} • IoU Dedup • EMA • Fusion: ${fs.fusion_latency_ms}ms`;
+            }
+            const voiceEl = document.getElementById('decisionVoiceEngine');
+            if (voiceEl && dt.voice_engine) {
+                voiceEl.innerText = dt.voice_engine;
             }
             const rawCnt = fs.raw_candidate_count !== undefined ? fs.raw_candidate_count : (data.objects ? data.objects.length : 0);
             document.getElementById('fusionRawBadge').innerText = `${rawCnt} ứng viên`;

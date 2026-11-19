@@ -6,6 +6,7 @@ AI Visual Guidance System - Backend API Server (FastAPI)
 import os
 import io
 import sys
+import json
 import subprocess
 import base64
 import asyncio
@@ -218,19 +219,32 @@ class ConnectionManager:
             except Exception:
                 pass
 
+    async def broadcast_to_viewers(self, message: dict):
+        """
+        Chuyển tiếp telemetry & khung hình do điện thoại tự xử lý trên NPU/Edge sang Web Monitor
+        trên Laptop (0% tải suy luận trên Laptop và không gửi dội ngược về điện thoại).
+        """
+        self.latest_result = message
+        for conn in list(self.viewer_connections):
+            try:
+                await conn.send_json(message)
+            except Exception:
+                pass
+
 manager = ConnectionManager()
 
 
 @app.websocket("/api/v1/vision/stream")
 async def websocket_endpoint(websocket: WebSocket):
     """
-    WebSocket Stream phân tích video thời gian thực từ Mobile App / Web.
-    - Phone Client: Gửi frame base64 -> Nhận kết quả AI siêu gọn -> Broadcast full HUD cho Web Monitor.
-    - Web Viewer (VIEW_ONLY): Nhận push trực tiếp khi có frame mới (loại bỏ loop gửi trùng mỗi 80ms).
+    WebSocket Stream phân tích video thời gian thực từ Mobile App / Web:
+    - Phone Server-Assist: Gửi frame base64 -> Laptop chạy AI & trả JSON gọn -> Broadcast Web Monitor.
+    - Phone Edge/NPU Telemetry: Gửi JSON `type=EDGE_TELEMETRY` đã suy luận trên điện thoại -> Laptop chỉ mirror lên Web Monitor.
+    - Web Viewer (VIEW_ONLY): Nhận push trực tiếp khi có frame mới.
     """
     await manager.connect(websocket)
 
-    state = {"latest": None, "closed": False, "is_viewer": False}
+    state = {"latest": None, "latest_telemetry": None, "closed": False, "is_viewer": False}
     new_frame = asyncio.Event()
 
     async def reader():
@@ -246,6 +260,19 @@ async def websocket_endpoint(websocket: WebSocket):
                         except Exception:
                             pass
                     continue
+                stripped = msg.lstrip()
+                if stripped.startswith("{"):
+                    try:
+                        parsed = json.loads(stripped)
+                        if isinstance(parsed, dict) and (
+                            parsed.get("type") == "EDGE_TELEMETRY"
+                            or str(parsed.get("mode", "")).startswith("EDGE")
+                        ):
+                            state["latest_telemetry"] = parsed
+                            new_frame.set()
+                            continue
+                    except Exception:
+                        pass
                 state["latest"] = msg
                 new_frame.set()
         except Exception:
@@ -268,6 +295,14 @@ async def websocket_endpoint(websocket: WebSocket):
             new_frame.clear()
             if state["closed"]:
                 break
+
+            tele = state["latest_telemetry"]
+            if tele is not None:
+                state["latest_telemetry"] = None
+                tele.setdefault("success", True)
+                tele.setdefault("mode", "EDGE_ON_DEVICE_NPU")
+                await manager.broadcast_to_viewers(tele)
+
             data = state["latest"]
             state["latest"] = None
             if not data:
