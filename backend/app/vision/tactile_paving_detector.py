@@ -31,6 +31,14 @@ def detect_tactile_paving(image_or_bytes) -> bool:
     x_start = int(width * 0.20)
     x_end = int(width * 0.80)
     roi_bottom = img[y_start:height, x_start:x_end]
+    if roi_bottom.size == 0:
+        return False
+
+    # Thu nhỏ vùng bước chân về ngang <= 160px để HSV + Morphology nhanh gấp ~3-4x
+    rh, rw = roi_bottom.shape[:2]
+    if rw > 160:
+        scale = 160.0 / float(rw)
+        roi_bottom = cv2.resize(roi_bottom, (160, max(16, int(round(rh * scale)))), interpolation=cv2.INTER_AREA)
     
     # 3. Chuyển sang không gian màu HSV để lọc màu Vàng đặc trưng của gạch khiếm thị
     hsv = cv2.cvtColor(roi_bottom, cv2.COLOR_BGR2HSV)

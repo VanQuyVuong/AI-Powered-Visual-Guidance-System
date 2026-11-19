@@ -40,9 +40,12 @@ class GeometricHazardDetector:
             h, w = dmap.shape[:2]
             x1, x2 = int(w * 0.22), int(w * 0.78)
             y1, y2 = int(h * 0.22), int(h * 0.78)
-            roi_depth = dmap[y1:y2, x1:x2]
+            roi_full = dmap[y1:y2, x1:x2]
 
-            if roi_depth.size > 0:
+            if roi_full.size > 0:
+                step_d = 2 if (roi_full.shape[0] >= 120 and roi_full.shape[1] >= 120) else 1
+                roi_depth = roi_full[::step_d, ::step_d]
+
                 # Kiểm tra xem có phải mặt đường/sàn nhà dốc xa dần không:
                 # Trên mặt đường mở, phần trên (y1) xa hơn phần dưới (y2) rất nhiều.
                 rh = roi_depth.shape[0]
@@ -50,8 +53,8 @@ class GeometricHazardDetector:
                 bot_band_z = float(np.median(roi_depth[max(0, int(rh * 0.75)):, :]))
                 vertical_z_span = abs(top_band_z - bot_band_z)
 
-                # Chuẩn hóa Sobel ksize=3 bằng cách chia cho 8.0 để lấy đúng dZ/dy (mét/pixel)
-                grad_y = cv2.Sobel(roi_depth, cv2.CV_32F, 0, 1, ksize=3) / 8.0
+                # Chuẩn hóa Sobel ksize=3 chia cho (8.0 * step_d) để lấy đúng dZ/dy (mét/pixel gốc)
+                grad_y = cv2.Sobel(roi_depth, cv2.CV_32F, 0, 1, ksize=3) / (8.0 * step_d)
                 abs_grad_y = np.abs(grad_y)
 
                 median_roi_z = float(np.median(roi_depth))
@@ -62,17 +65,17 @@ class GeometricHazardDetector:
                         & (roi_depth <= median_roi_z + 0.45)
                     ).astype(np.uint8)
 
-                    roi_area = float((x2 - x1) * (y2 - y1))
-                    wall_pixel_count = int(np.sum(wall_mask))
+                    roi_area = float(wall_mask.size)
+                    wall_pixel_count = int(cv2.countNonZero(wall_mask))
                     fill_ratio = wall_pixel_count / max(1.0, roi_area)
 
                     if fill_ratio >= 0.30:
                         ys, xs = np.where(wall_mask > 0)
                         if ys.size > 0:
-                            bx1 = x1 + int(np.percentile(xs, 5))
-                            bx2 = x1 + int(np.percentile(xs, 95))
-                            by1 = y1 + int(np.percentile(ys, 5))
-                            by2 = y1 + int(np.percentile(ys, 95))
+                            bx1 = x1 + int(np.percentile(xs, 5) * step_d)
+                            bx2 = x1 + int(np.percentile(xs, 95) * step_d)
+                            by1 = y1 + int(np.percentile(ys, 5) * step_d)
+                            by2 = y1 + int(np.percentile(ys, 95) * step_d)
 
                             has_center_kbox = any(
                                 (k.get("x1", 0) < w * 0.65 and k.get("x2", 0) > w * 0.35)
@@ -121,6 +124,14 @@ class GeometricHazardDetector:
 
                 if not is_open_corridor:
                     roi_bgr = frame_bgr[cy1:cy2, cx1:cx2]
+                    # Thu nhỏ ROI xuống ngang <= 128px cho bước kiểm tra tường phẳng quang học (nhanh gấp ~10x)
+                    if roi_bgr.shape[1] > 128:
+                        s_wall = 128.0 / float(roi_bgr.shape[1])
+                        roi_bgr = cv2.resize(
+                            roi_bgr,
+                            (128, max(32, int(round(roi_bgr.shape[0] * s_wall)))),
+                            interpolation=cv2.INTER_AREA,
+                        )
                     gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
                     hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
 
@@ -131,45 +142,44 @@ class GeometricHazardDetector:
                     med_s = float(np.median(hsv[:, :, 1]))
                     med_v = float(np.median(hsv[:, :, 2]))
 
-                    flat_blocks = 0
-                    total_blocks = 16
-                    edges = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 40, 120)
+                    if med_v >= 30.0:
+                        flat_blocks = 0
+                        edges = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 40, 120)
 
-                    for r in range(4):
-                        for c in range(4):
-                            sub_g = gray[r * bh:(r + 1) * bh, c * bw:(c + 1) * bw]
-                            sub_hsv = hsv[r * bh:(r + 1) * bh, c * bw:(c + 1) * bw]
-                            sub_e = edges[r * bh:(r + 1) * bh, c * bw:(c + 1) * bw]
-                            if sub_g.size == 0:
-                                continue
-                            std_g = float(np.std(sub_g))
-                            edge_ratio = float(np.count_nonzero(sub_e)) / float(sub_e.size)
-                            dh = min(abs(float(np.median(sub_hsv[:, :, 0])) - med_h), 180.0 - abs(float(np.median(sub_hsv[:, :, 0])) - med_h))
-                            ds = abs(float(np.median(sub_hsv[:, :, 1])) - med_s)
-                            dv = abs(float(np.median(sub_hsv[:, :, 2])) - med_v)
+                        for r in range(4):
+                            for c in range(4):
+                                sub_g = gray[r * bh:(r + 1) * bh, c * bw:(c + 1) * bw]
+                                sub_hsv = hsv[r * bh:(r + 1) * bh, c * bw:(c + 1) * bw]
+                                sub_e = edges[r * bh:(r + 1) * bh, c * bw:(c + 1) * bw]
+                                if sub_g.size == 0:
+                                    continue
+                                std_g = float(np.std(sub_g))
+                                edge_ratio = float(cv2.countNonZero(sub_e)) / float(sub_e.size)
+                                dh = min(abs(float(np.median(sub_hsv[:, :, 0])) - med_h), 180.0 - abs(float(np.median(sub_hsv[:, :, 0])) - med_h))
+                                ds = abs(float(np.median(sub_hsv[:, :, 1])) - med_s)
+                                dv = abs(float(np.median(sub_hsv[:, :, 2])) - med_v)
 
-                            if std_g < 22.0 and edge_ratio < 0.045 and dh < 22.0 and ds < 50.0 and dv < 55.0:
-                                flat_blocks += 1
+                                if std_g < 22.0 and edge_ratio < 0.045 and dh < 22.0 and ds < 50.0 and dv < 55.0:
+                                    flat_blocks += 1
 
-                    # Nếu >= 11/16 ô trung tâm là cùng một mảng bề mặt phẳng đồng nhất VÀ đủ ánh sáng (med_v >= 30.0,
-                    # tránh trường hợp đi vào chỗ tối om hoặc bị che camera mà báo nhầm là bức tường)
-                    if flat_blocks >= 11 and med_v >= 30.0:
-                        est_dist = 1.2
-                        if dmap is not None and dmap.size > 0:
-                            est_dist = round(min(3.5, max(0.5, float(np.median(dmap[cy1:cy2, cx1:cx2])))), 1)
-                        is_danger = est_dist <= 1.35
-                        return {
-                            "class_name": "wall",
-                            "class_name_vn": "bức tường",
-                            "confidence": round(min(0.92, 0.65 + (flat_blocks / 16.0) * 0.25), 2),
-                            "position": "center",
-                            "distance_m": est_dist,
-                            "bounding_box": {"x1": cx1, "y1": cy1, "x2": cx2, "y2": cy2},
-                            "in_roi": is_danger,
-                            "is_danger": is_danger,
-                            "hazard_type": "WALL_OBSTACLE",
-                            "warning": f"Phía trước {est_dist} mét có bức tường chắn lối đi." if is_danger else ""
-                        }
+                        # Nếu >= 11/16 ô trung tâm là cùng một mảng bề mặt phẳng đồng nhất VÀ đủ ánh sáng
+                        if flat_blocks >= 11:
+                            est_dist = 1.2
+                            if dmap is not None and dmap.size > 0:
+                                est_dist = round(min(3.5, max(0.5, float(np.median(dmap[cy1:cy2:2, cx1:cx2:2])))), 1)
+                            is_danger = est_dist <= 1.35
+                            return {
+                                "class_name": "wall",
+                                "class_name_vn": "bức tường",
+                                "confidence": round(min(0.92, 0.65 + (flat_blocks / 16.0) * 0.25), 2),
+                                "position": "center",
+                                "distance_m": est_dist,
+                                "bounding_box": {"x1": cx1, "y1": cy1, "x2": cx2, "y2": cy2},
+                                "in_roi": is_danger,
+                                "is_danger": is_danger,
+                                "hazard_type": "WALL_OBSTACLE",
+                                "warning": f"Phía trước {est_dist} mét có bức tường chắn lối đi." if is_danger else ""
+                            }
 
         return None
 
@@ -205,40 +215,41 @@ class GeometricHazardDetector:
             if kx1 < w * 0.68 and kx2 > w * 0.32 and ky2 > h * 0.45 and (kx2 - kx1) >= w * 0.22:
                 return None
 
-        # 1. Trích xuất ROI vùng bước chân
+        # 1. Trích xuất ROI vùng bước chân & dùng stride step=2 khi ROI lớn (>= 380px) để tăng tốc ~4x mà giữ sắc nét gờ bậc
         gy1, gy2 = int(h * 0.38), int(h * 0.95)
         gx1, gx2 = int(w * 0.12), int(w * 0.88)
 
-        roi_bgr = frame_bgr[gy1:gy2, gx1:gx2]
-        if roi_bgr.size == 0:
+        roi_bgr_full = frame_bgr[gy1:gy2, gx1:gx2]
+        if roi_bgr_full.size == 0:
             return None
 
-        roi_depth = dmap[gy1:gy2, gx1:gx2]
-        rh = roi_depth.shape[0]
-        if rh < 24:
+        roi_depth_full = dmap[gy1:gy2, gx1:gx2]
+        full_rh, full_rw = roi_depth_full.shape[:2]
+        if full_rh < 24:
             return None
 
-        # KIỂM TRA CHỐNG NHẦM TƯỜNG PHẲNG / THÂN TỦ CÓ KỆ NGANG THÀNH CẦU THANG:
-        # Lưu ý vật lý 3D quan trọng:
-        # - Khi đi XUỐNG cầu thang: cả khoảng cách ngang X và độ tụt sâu Y cùng tăng -> |top_z - bot_z| rất lớn (~1.4m).
-        # - Khi đi LÊN cầu thang: bậc càng lên cao thì càng gần tầm mắt camera đeo ngực (H_cam - Y giảm) bù trừ với X tăng,
-        #   nên khoảng cách xuyên tâm Z trên các bậc đi lên chênh lệch rất ít (|top_z - bot_z| chỉ ~0.05m - 0.25m),
-        #   NHƯNG mặt bậc (tối) và cổ bậc (sáng) tạo ra độ phân tầng độ sáng cực lớn (p90_p10 >= 42.0).
-        top_z = float(np.median(roi_depth[:rh // 3, :]))
-        bot_z = float(np.median(roi_depth[2 * rh // 3:, :]))
+        step = 2 if (full_rw >= 380 and full_rh >= 160) else 1
+        roi_bgr = roi_bgr_full[::step, ::step]
+        roi_depth = roi_depth_full[::step, ::step]
+        scale = 1.0 / float(step)
+
+        rh, rw = roi_depth.shape[:2]
+        if rh < 16:
+            return None
+
+        top_z = float(np.median(roi_depth[:max(1, rh // 3), :]))
+        bot_z = float(np.median(roi_depth[min(rh - 1, 2 * rh // 3):, :]))
         std_z = float(np.std(roi_depth))
 
-        # 2. Lọc cạnh ngang thực tế (hỗ trợ cả bậc đá hoa cương tối màu ở cầu thang đi xuống lẫn bậc gạch sáng màu)
+        # 2. Lọc cạnh ngang thực tế
         gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        blurred = cv2.GaussianBlur(gray, (3, 3) if step == 2 else (5, 5), 0)
 
         sobel_x = cv2.Sobel(blurred, cv2.CV_16S, 1, 0, ksize=3)
         sobel_y = cv2.Sobel(blurred, cv2.CV_16S, 0, 1, ksize=3)
         abs_x = cv2.convertScaleAbs(sobel_x)
         abs_y = cv2.convertScaleAbs(sobel_y)
 
-        # Tính tỷ lệ cạnh ngang/dọc ở dải trung tâm bước chân (tránh bị nhiễu bởi song sắt dọc của tay vịn lan can ở rìa trái/phải)
-        rw = roi_bgr.shape[1]
         cx_l, cx_r = int(rw * 0.18), int(rw * 0.82)
         center_abs_x = abs_x[:, cx_l:cx_r]
         center_abs_y = abs_y[:, cx_l:cx_r]
@@ -248,34 +259,37 @@ class GeometricHazardDetector:
             return None
 
         depth_column = np.median(roi_depth[:, cx_l:cx_r], axis=1)
-        gray_column = np.median(blurred[:, cx_l:cx_r], axis=1)
+        gray_column = np.median((gray if step == 2 else blurred)[:, cx_l:cx_r], axis=1)
         sy_column = np.median(center_abs_y, axis=1)
         p90_p10 = float(np.percentile(gray_column, 90) - np.percentile(gray_column, 10))
 
-        # Nếu bề mặt phẳng lì theo phương đứng (|top_z - bot_z| < 0.22 và std_z < 0.18) VÀ không có phân tầng mặt bậc/cổ bậc (p90_p10 < 40.0)
-        # -> Chắc chắn là bức tường phẳng hoặc thân chiếc tủ có vệt kệ ngang, loại bỏ ngay!
+        # Nếu bề mặt phẳng lì theo phương đứng -> Loại bỏ ngay
         if abs(top_z - bot_z) < 0.22 and std_z < 0.18 and p90_p10 < 40.0:
             return None
 
-        # Giữ lại các cạnh ngang gờ bậc (abs_y >= 28 và trội hơn cạnh dọc tại điểm đó)
+        # Giữ lại các cạnh ngang gờ bậc
         horiz_mask = ((abs_y >= 28) & (abs_y.astype(np.float32) >= abs_x.astype(np.float32) * 1.35)).astype(np.uint8) * 255
 
         # Nối liền các vết đứt nhỏ dọc theo gờ bậc
-        kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 3))
+        kw_close = max(5, int(round(9 * scale)) | 1)
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (kw_close, 3))
         horizontal_edges = cv2.morphologyEx(horiz_mask, cv2.MORPH_CLOSE, kernel_close)
 
-        # 3. Dò các đoạn thẳng gờ bậc bằng HoughLinesP (chiều dài tối thiểu >= 28% chiều ngang ảnh)
-        min_line_len = int(w * 0.28)
+        # 3. Dò các đoạn thẳng gờ bậc bằng HoughLinesP
+        min_line_len = max(20, int(w * 0.28 * scale))
+        hough_thresh = max(18, int(round(32 * scale)))
+        max_gap = max(8, int(round(22 * scale)))
         lines = cv2.HoughLinesP(
             horizontal_edges,
             rho=1,
             theta=np.pi / 180,
-            threshold=32,
+            threshold=hough_thresh,
             minLineLength=min_line_len,
-            maxLineGap=22,
+            maxLineGap=max_gap,
         )
 
         valid_horizontal_lines = []
+        inv_scale = 1.0 / scale
         if lines is not None:
             for l in lines:
                 pts = l.flatten()
@@ -284,8 +298,9 @@ class GeometricHazardDetector:
                 lx1, ly1, lx2, ly2 = int(pts[0]), int(pts[1]), int(pts[2]), int(pts[3])
                 angle = np.abs(np.arctan2(ly2 - ly1, lx2 - lx1) * 180.0 / np.pi)
                 if angle <= 14.0:
-                    full_x1, full_x2 = gx1 + min(lx1, lx2), gx1 + max(lx1, lx2)
-                    full_y = gy1 + int((ly1 + ly2) / 2.0)
+                    full_x1 = gx1 + int(round(min(lx1, lx2) * inv_scale))
+                    full_x2 = gx1 + int(round(max(lx1, lx2) * inv_scale))
+                    full_y = gy1 + int(round(((ly1 + ly2) / 2.0) * inv_scale))
                     if self._is_line_inside_yolo_box(full_x1, full_x2, full_y, known_boxes):
                         continue
 
@@ -299,11 +314,12 @@ class GeometricHazardDetector:
         if not valid_horizontal_lines:
             return None
 
-        # Gom nhóm các cạnh ngang cách nhau <= 26px thành 1 bậc duy nhất
+        # Gom nhóm các cạnh ngang cách nhau <= 26px (theo ảnh gốc) thành 1 bậc duy nhất
+        cluster_gap = 26.0 * scale
         valid_horizontal_lines.sort(key=lambda item: item["y_avg"])
         clusters: List[Dict[str, float]] = []
         for line in valid_horizontal_lines:
-            if not clusters or abs(line["y_avg"] - clusters[-1]["y_avg"]) > 26:
+            if not clusters or abs(line["y_avg"] - clusters[-1]["y_avg"]) > cluster_gap:
                 clusters.append({
                     "y_avg": line["y_avg"],
                     "x1": float(line["x1"]),
@@ -318,11 +334,11 @@ class GeometricHazardDetector:
                 c["max_len"] = max(c["max_len"], float(c["x2"] - c["x1"]))
 
         clustered_y = [c["y_avg"] for c in clusters]
-        max_span_px = max((c["x2"] - c["x1"]) for c in clusters)
+        max_span_px = max((c["x2"] - c["x1"]) for c in clusters) * inv_scale
         if max_span_px < w * 0.28:
             return None
 
-        # 4. Phân tích kết hợp Bước nhảy độ sâu 3D (Step Discontinuity) VÀ Hồ sơ quang học bậc thang thực tế:
+        # 4. Phân tích kết hợp Bước nhảy độ sâu 3D & Hồ sơ quang học bậc thang thực tế
         dy_all = np.diff(depth_column)
         baseline_slope_per_px = float(max(0.0, -np.median(dy_all)))
 
@@ -331,33 +347,43 @@ class GeometricHazardDetector:
         max_net_jump = 0.0
         cluster_depths: List[float] = []
 
+        w_out = max(3, int(round(12 * scale)))
+        w_in = max(1, int(round(2 * scale)))
+        min_edge_pad = max(3, int(round(10 * scale)))
+        g_pad_out = max(3, int(round(12 * scale)))
+        g_pad_in = max(1, int(round(3 * scale)))
+        g_min_edge = max(3, int(round(6 * scale)))
+        sy_half = max(2, int(round(4 * scale)))
+
         for cy in clustered_y:
             y_idx = int(cy)
-            if 10 <= y_idx < len(depth_column) - 10:
-                z_upper = float(np.mean(depth_column[max(0, y_idx - 12):max(1, y_idx - 2)]))
-                z_lower = float(np.mean(depth_column[min(len(depth_column) - 1, y_idx + 2):min(len(depth_column), y_idx + 12)]))
+            if min_edge_pad <= y_idx < len(depth_column) - min_edge_pad:
+                z_upper = float(np.mean(depth_column[max(0, y_idx - w_out):max(1, y_idx - w_in)]))
+                z_lower = float(np.mean(depth_column[min(len(depth_column) - 1, y_idx + w_in):min(len(depth_column), y_idx + w_out)]))
                 cluster_depths.append(float(depth_column[y_idx]))
 
                 raw_jump = z_upper - z_lower
-                expected_smooth_drop = baseline_slope_per_px * 14.0
+                expected_smooth_drop = baseline_slope_per_px * float(w_out + w_in)
                 net_jump = raw_jump - expected_smooth_drop
 
                 if raw_jump >= 0.18 and net_jump >= 0.14:
                     depth_jumps += 1
                     max_net_jump = max(max_net_jump, net_jump)
 
-            if 6 <= y_idx < len(gray_column) - 6:
-                g_upper = float(np.mean(gray_column[max(0, y_idx - 12):max(1, y_idx - 3)]))
-                g_lower = float(np.mean(gray_column[min(len(gray_column) - 1, y_idx + 3):min(len(gray_column), y_idx + 12)]))
-                local_sy_peak = float(np.max(sy_column[max(0, y_idx - 4):min(len(sy_column), y_idx + 5)]))
+            if g_min_edge <= y_idx < len(gray_column) - g_min_edge:
+                g_upper = float(np.mean(gray_column[max(0, y_idx - g_pad_out):max(1, y_idx - g_pad_in)]))
+                g_lower = float(np.mean(gray_column[min(len(gray_column) - 1, y_idx + g_pad_in):min(len(gray_column), y_idx + g_pad_out)]))
+                local_sy_peak = float(np.max(sy_column[max(0, y_idx - sy_half):min(len(sy_column), y_idx + sy_half + 1)]))
                 if abs(g_upper - g_lower) >= 12.0 or (p90_p10 >= 22.0 and local_sy_peak >= 24.0):
+                    optical_jumps += 1
+                elif local_sy_peak >= 100.0 and min_edge_pad <= y_idx < len(depth_column) - min_edge_pad and max_net_jump >= 0.18:
+                    # Bậc thềm đơn lẻ (1 gờ ngang rất sắc nét ngay tại bước nhảy độ sâu 3D >= 0.18m)
                     optical_jumps += 1
 
         step_min_y = int(min(clustered_y))
         step_max_y = int(max(clustered_y))
-        vertical_span = step_max_y - step_min_y
+        vertical_span = (step_max_y - step_min_y) * inv_scale
 
-        # Nhánh 1: Phát hiện theo Bước nhảy độ sâu 3D sắc nét (bậc thềm đơn lẻ, bậc tam cấp, cầu thang 3D rõ nét)
         monotonic_3d = True
         if len(cluster_depths) >= 2:
             for i in range(len(cluster_depths) - 1):
@@ -373,7 +399,6 @@ class GeometricHazardDetector:
             and ((top_z - bot_z) >= 0.28)
         )
 
-        # Nhánh 2: Phát hiện Cầu thang nhiều bậc thực tế (cả đi xuống lẫn đi lên)
         has_real_multistep_pattern = (
             len(clustered_y) >= 3
             and vertical_span >= 75
@@ -389,13 +414,16 @@ class GeometricHazardDetector:
         if not (has_3d_step_jumps or has_real_multistep_pattern):
             return None
 
-        # 5. Xác định tọa độ & khoảng cách
-        bx1 = gx1 + int(min(c["x1"] for c in clusters))
-        bx2 = gx1 + int(max(c["x2"] for c in clusters))
-        by1 = gy1 + max(0, step_min_y - 20)
-        by2 = gy1 + min(gy2 - gy1, step_max_y + 35)
+        # 5. Quy đổi tọa độ & khoảng cách về khung hình gốc
+        bx1 = gx1 + int(round(min(c["x1"] for c in clusters) * inv_scale))
+        bx2 = gx1 + int(round(max(c["x2"] for c in clusters) * inv_scale))
+        orig_min_y = int(round(step_min_y * inv_scale))
+        orig_max_y = int(round(step_max_y * inv_scale))
+        by1 = gy1 + max(0, orig_min_y - 20)
+        by2 = gy1 + min(full_rh, orig_max_y + 35)
 
-        stair_depth_roi = roi_depth[max(0, step_min_y):min(roi_depth.shape[0], step_max_y + 12), :]
+        pad_tail = max(4, int(round(12 * scale)))
+        stair_depth_roi = roi_depth[max(0, step_min_y):min(roi_depth.shape[0], step_max_y + pad_tail), :]
         stair_dist = round(float(np.median(stair_depth_roi)), 1) if stair_depth_roi.size > 0 else 1.5
 
         # Khi đứng ngay đầu cầu thang đi xuống/đi lên thực tế (bậc dưới cùng nằm sát chân ảnh by2 >= 62% chiều cao ảnh),
@@ -460,34 +488,33 @@ class GeometricHazardDetector:
         if roi.size == 0:
             return None
 
-        # Tính độ sâu trung vị và độ biến thiên dọc |dZ/dy| cho từng cột pixel x
-        col_med_z = np.median(roi, axis=0)
-        col_dz_dy = np.mean(np.abs(np.diff(roi, axis=0)), axis=0)
+        # Downsample theo bước nhảy để tính trung vị cột nhanh gấp ~4x mà không mất cạnh cột
+        step_y = 2 if roi.shape[0] >= 100 else 1
+        step_x = 2 if w >= 320 else 1
+        roi_s = roi[::step_y, ::step_x]
+
+        col_med_z = np.median(roi_s, axis=0)
+        col_dz_dy = np.mean(np.abs(np.diff(roi_s, axis=0)), axis=0) / float(step_y)
 
         # Cột pixel thuộc vật cản đứng gần nếu z <= 1.75m và bề mặt thẳng đứng (col_dz_dy < 0.025)
         is_vert_close = (col_med_z <= 1.75) & (col_dz_dy < 0.025)
 
-        # Tìm đoạn liên tục (contiguous run) dài nhất có giao cắt với hành lang giữa [0.32*w, 0.68*w]
+        # Vectorized tìm các đoạn liên tục (contiguous runs) thay cho vòng lặp Python theo từng pixel
+        sw = len(is_vert_close)
+        padded = np.concatenate(([False], is_vert_close, [False]))
+        diffs = np.diff(padded.astype(np.int8))
+        starts = np.flatnonzero(diffs == 1)
+        ends = np.flatnonzero(diffs == -1)
+
         best_run = None
         best_len = 0
-        cur_start = None
-
-        for x in range(w):
-            if is_vert_close[x]:
-                if cur_start is None:
-                    cur_start = x
-            else:
-                if cur_start is not None:
-                    run_len = x - cur_start
-                    if run_len > best_len and cur_start < int(w * 0.68) and x > int(w * 0.32):
-                        best_len = run_len
-                        best_run = (cur_start, x)
-                    cur_start = None
-        if cur_start is not None:
-            run_len = w - cur_start
-            if run_len > best_len and cur_start < int(w * 0.68) and w > int(w * 0.32):
-                best_len = run_len
-                best_run = (cur_start, w)
+        mid_l = int(sw * 0.32)
+        mid_r = int(sw * 0.68)
+        for s_idx, e_idx in zip(starts, ends):
+            r_len = int(e_idx - s_idx)
+            if r_len > best_len and s_idx < mid_r and e_idx > mid_l:
+                best_len = r_len
+                best_run = (int(s_idx) * step_x, min(w, int(e_idx) * step_x))
 
         if best_run is None:
             return None
@@ -498,15 +525,19 @@ class GeometricHazardDetector:
         if span_ratio < 0.12 or span_ratio > 0.64:
             return None
 
-        pillar_z = float(np.median(col_med_z[bx1:bx2]))
+        s_bx1 = bx1 // step_x
+        s_bx2 = max(s_bx1 + 1, bx2 // step_x)
+        pillar_z = float(np.median(col_med_z[s_bx1:s_bx2]))
         if pillar_z < 0.30 or pillar_z > 1.75:
             return None
 
         # Kiểm tra độ tương phản độ sâu với nền hai bên cột (ít nhất 1 bên phải sâu hơn cột >= 0.35m)
-        left_bg = col_med_z[:max(0, bx1 - 6)]
-        right_bg = col_med_z[min(w, bx2 + 6):]
-        left_diff = (float(np.median(left_bg)) - pillar_z) if left_bg.size >= 8 else 0.0
-        right_diff = (float(np.median(right_bg)) - pillar_z) if right_bg.size >= 8 else 0.0
+        pad_bg = max(2, 6 // step_x)
+        left_bg = col_med_z[:max(0, s_bx1 - pad_bg)]
+        right_bg = col_med_z[min(sw, s_bx2 + pad_bg):]
+        min_bg_sz = max(3, 8 // step_x)
+        left_diff = (float(np.median(left_bg)) - pillar_z) if left_bg.size >= min_bg_sz else 0.0
+        right_diff = (float(np.median(right_bg)) - pillar_z) if right_bg.size >= min_bg_sz else 0.0
 
         if max(left_diff, right_diff) < 0.35:
             return None
@@ -646,12 +677,14 @@ class GeometricHazardDetector:
         known_boxes = known_boxes or []
         gx1, gx2 = int(w * 0.24), int(w * 0.76)
         gy1, gy2 = int(h * 0.50), int(h * 0.92)
-        foot_roi = dmap[gy1:gy2, gx1:gx2]
-        if foot_roi.size == 0:
+        foot_full = dmap[gy1:gy2, gx1:gx2]
+        if foot_full.size == 0:
             return None
 
+        step_f = 2 if (foot_full.shape[0] >= 80 and foot_full.shape[1] >= 120) else 1
+        foot_roi = foot_full[::step_f, ::step_f]
         rh, rw = foot_roi.shape[:2]
-        if rh < 16:
+        if rh < 12:
             return None
 
         # Mặt đất bình thường quanh mép trên vùng bước chân phải nằm trong tầm gần (0.5m - 2.3m)
@@ -679,8 +712,8 @@ class GeometricHazardDetector:
         if pit_ratio < 0.25:
             return None
 
-        bx1, bx2 = gx1 + int(rw * 0.10), gx1 + int(rw * 0.90)
-        by1 = gy1 + max(0, drop_row_idx - 4)
+        bx1, bx2 = gx1 + int(rw * 0.10 * step_f), gx1 + int(rw * 0.90 * step_f)
+        by1 = gy1 + max(0, drop_row_idx * step_f - 4)
         by2 = gy2
 
         if self._is_box_covered(bx1, by1, bx2, by2, known_boxes, thresh=0.35):
