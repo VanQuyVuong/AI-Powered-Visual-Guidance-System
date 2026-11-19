@@ -23,7 +23,7 @@ from app.vision.decision_engine import (
 )
 from app.vision.tactile_paving_detector import detect_tactile_paving
 from app.vision.depth_service import depth_service
-from app.vision.distance_estimator import estimate_distance_m
+from app.vision.distance_estimator import estimate_distance_m, resolve_calibrated_distance
 from app.vision.sam_service import sam_service
 from app.vision.fusion_engine import fusion_engine
 
@@ -189,22 +189,12 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False, include_visu
         is_person = (cname == "person")
 
         # 2. Ưu tiên lấy khoảng cách mét tinh chỉnh theo Pixel Mask của EdgeSAM + Depth Anything V2,
-        # ĐỒNG THỜI đối chiếu chéo với khoảng cách hình học Pinhole để chống lỗi lệch frame (stale depth map)
-        # khi lia camera nhanh từ vật gần sang chiếc ghế ở xa (ví dụ ghế cách 5.5m nhưng depth map cũ còn lưu 1.3m).
+        # ĐỒNG THỜI đối chiếu chéo với khoảng cách hình học Pinhole qua `resolve_calibrated_distance`
+        # để chống báo gần sai lệch cho vật cản ở xa > 2.4m (VD: ghế cách 4-5 viên gạch) hoặc stale depth map.
         pinhole_dist = estimate_distance_m(cname, box, img_width, img_height)
         sam_mask_dist = sam_service.get_mask_refined_depth(box, dmap)
         metric_dist = sam_mask_dist or depth_service.get_box_median_depth(box["x1"], box["y1"], box["x2"], box["y2"], dmap)
-        box_h_ratio = (box["y2"] - box["y1"]) / float(max(1, img_height))
-
-        if metric_dist is not None and 0.2 <= metric_dist <= 15.0:
-            # Nếu hộp bao rất nhỏ (vật ở xa >= 3.0m theo kích thước quang học) nhưng depth map lại báo quá gần (< 62% pinhole_dist)
-            # do bản đồ độ sâu bất đồng bộ chưa kịp cập nhật khi xoay camera -> ưu tiên khoảng cách quang học thực tế!
-            if pinhole_dist >= 3.0 and box_h_ratio < 0.22 and metric_dist < pinhole_dist * 0.62:
-                dist_m = round(pinhole_dist, 1)
-            else:
-                dist_m = round(metric_dist, 1)
-        else:
-            dist_m = round(pinhole_dist, 1)
+        dist_m = resolve_calibrated_distance(cname, metric_dist, pinhole_dist, box, img_width, img_height)
 
         overlaps_center = (box["x1"] < 0.58 * img_width and box["x2"] > 0.42 * img_width)
         # 3. Tiêu chí nguy hiểm chuẩn trong nhà: Chỉ cảnh báo chắn lối đi thẳng khi vật cản thực sự nằm ở làn giữa (hoặc tràn sâu vào trục giữa) và <= 2.25m.
