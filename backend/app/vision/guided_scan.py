@@ -365,11 +365,12 @@ def update_spatial_scan_and_voice(
             should_speak = True
             st["pending_post_turn_reconfirm"] = False
     elif status in ("TURN_LEFT", "TURN_RIGHT", "TURN_AROUND", "ALLEY_DRIFT_LEFT", "ALLEY_DRIFT_RIGHT"):
-        # 1. Nếu chuyển từ CLEAR / ALLEY_CLEAR sang có vật cản nguy hiểm hoặc lệch sát tường hẻm -> Cảnh báo TỨC THÌ (0.0s, frame 1)!
-        # 2. Nếu người dùng vẫn tiếp tục tiến sát vào vật cản đó đến mức nguy kịch (<= 0.85m, giảm >= 0.45m so với lúc báo trước)
-        #    -> Nhắc khẩn cấp sau 1.8s mà không cần chờ hết 6.0s!
-        min_frames = 1 if is_fresh_from_clear else 2
-        min_interval = 0.0 if is_fresh_from_clear else 1.2
+        # 1. Nếu chuyển từ CLEAR / ALLEY_CLEAR sang có vật cản nguy hiểm -> Cảnh báo TỨC THÌ (0.0s, frame 1)!
+        # 2. Nếu đổi hướng đột ngột (TURN_LEFT <-> TURN_RIGHT / TURN_AROUND) do vật cản sát <= 1.15m -> Cho phép ngắt phản xạ ngay 0.0s!
+        # 3. Nếu người dùng tiến sát vào vật cản đến mức nguy kịch (<= 0.85m, giảm >= 0.45m) -> Nhắc khẩn cấp sau 1.8s!
+        urgent_reroute = (last_sig != sig) and (min_dist <= 1.15)
+        min_frames = 1 if (is_fresh_from_clear or urgent_reroute) else 2
+        min_interval = 0.0 if (is_fresh_from_clear or urgent_reroute) else 0.9
         is_critical_approach = (min_dist <= 0.85 and (last_dist - min_dist) >= 0.45 and since >= 1.8)
 
         if (
@@ -383,13 +384,13 @@ def update_spatial_scan_and_voice(
         # Chế độ đi trong hẻm: Khi bắt đầu bước vào hẻm (last_sig != "ALLEY_CLEAR"), thông báo đúng 1 lần:
         # "Hai bên là bức tường dài, phía trước thông thoáng, bạn hãy đi thẳng."
         # Sau đó GIỮ IM LẶNG HOÀN TOÀN trong suốt quá trình đi thẳng trong hẻm, chỉ ngắt 0ms khi có vật cản phía trước!
-        if last_sig != "ALLEY_CLEAR" and since >= (0.0 if not last_sig else 0.8):
+        if last_sig != "ALLEY_CLEAR" and since >= (0.0 if not last_sig else 0.6):
             should_speak = True
             st["pending_post_turn_reconfirm"] = False
     else:  # CLEAR
-        # Nếu vừa rẽ trái/phải qua vật cản (was_turning_or_blocked): chỉ cần giữ hướng trống >= 2 frame và >= 0.75s
-        # là báo ngay "Phía trước an toàn, đi thẳng." để người khiếm thị yên tâm bước tiếp!
-        min_clear_interval = 0.75 if was_turning_or_blocked else 1.5
+        # Nếu vừa rẽ trái/phải qua vật cản (was_turning_or_blocked): chỉ cần giữ hướng trống >= 2 frame và >= 0.55s
+        # là báo ngay "Phía trước an toàn, đi thẳng." để người khiếm thị yên tâm bước tiếp nhanh hơn!
+        min_clear_interval = 0.55 if was_turning_or_blocked else 1.5
         if st["clear_frames"] >= 2 and since >= min_clear_interval and (last_sig != "CLEAR" or since >= CLEAR_REPEAT_INTERVAL_S):
             should_speak = True
             st["pending_post_turn_reconfirm"] = was_turning_or_blocked
