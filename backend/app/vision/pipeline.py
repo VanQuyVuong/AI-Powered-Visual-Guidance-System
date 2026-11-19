@@ -83,10 +83,60 @@ def _sync_navigation_with_decision(
     return nav_data
 
 
-def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
+def _encode_preview_visuals(
+    image_bytes: bytes,
+    frame_bgr: Optional[np.ndarray],
+    dmap: Optional[np.ndarray],
+    is_stream: bool,
+) -> tuple[Optional[str], Optional[str]]:
+    """
+    Mã hóa ảnh preview `frame_b64` và bản đồ độ sâu `depth_b64` cho Web Monitor (/view-phone):
+    - Tái sử dụng trực tiếp JPEG bytes đầu vào khi stream (0ms cv2.imencode).
+    - Thu gọn depth map về ngang <= 240px trước khi áp colormap Turbo để giảm ~70% thời gian mã hóa & băng thông.
+    """
+    import base64
+
+    frame_b64 = None
+    depth_b64 = None
+
+    if frame_bgr is not None:
+        try:
+            if is_stream and len(image_bytes) <= 120_000 and image_bytes[:2] == b"\xff\xd8":
+                frame_b64 = base64.b64encode(image_bytes).decode("utf-8")
+            else:
+                _, buffer = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                frame_b64 = base64.b64encode(buffer).decode("utf-8")
+        except Exception:
+            pass
+
+    cur_dmap = dmap if dmap is not None else depth_service.get_or_create_display_depth_map(frame_bgr)
+    if cur_dmap is not None and cur_dmap.size > 0:
+        try:
+            dh, dw = cur_dmap.shape[:2]
+            if dw > 240:
+                s_disp = 240.0 / float(dw)
+                disp_dmap = cv2.resize(
+                    cur_dmap,
+                    (240, max(32, int(round(dh * s_disp)))),
+                    interpolation=cv2.INTER_AREA,
+                )
+            else:
+                disp_dmap = cur_dmap
+            d_norm = cv2.normalize(disp_dmap, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+            d_colored = cv2.applyColorMap(d_norm, cv2.COLORMAP_TURBO)
+            _, d_buf = cv2.imencode(".jpg", d_colored, [cv2.IMWRITE_JPEG_QUALITY, 65])
+            depth_b64 = base64.b64encode(d_buf).decode("utf-8")
+        except Exception:
+            pass
+
+    return frame_b64, depth_b64
+
+
+def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False, include_visuals: bool = True) -> dict:
     """
     Toàn bộ phần xử lý nặng (YOLO + Depth Anything V2 + SegFormer + Geometric Hazard + Tactile Paving).
     Hàm đồng bộ chạy trong threadpool (asyncio.to_thread).
+    `include_visuals=False` bỏ qua mã hóa ảnh preview khi không có Web Monitor mở để giảm độ trễ & băng thông.
     """
     t0 = time.perf_counter()
     if not image_bytes:
@@ -110,7 +160,6 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
     dmap = depth_service.get_latest_depth_map()
 
     all_objects = []
-    roi_detections = []
     has_person_in_roi = False
     has_obstacle_in_roi = False
 
@@ -166,28 +215,10 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         # Chuẩn hóa confidence >= 0.40 cho các đồ vật nhỏ đã qua lọc
         effective_conf = max(conf, 0.42)
 
-        det_item = Detection(
-            class_name=det["class_name"],
-            class_name_vn=get_vietnamese_name(det["class_name"]),
-            confidence=effective_conf,
-            position=pos,
-            distance_m=dist_m,
-            in_roi=in_corridor or in_path,
-            is_danger=is_danger,
-            bounding_box=BoundingBox(**box)
-        )
-
-        if is_danger:
-            if is_person:
-                has_person_in_roi = True
-            else:
-                has_obstacle_in_roi = True
-            roi_detections.append(det_item)
-
         all_objects.append({
             "class_name": det["class_name"],
             "class_name_vn": get_vietnamese_name(det["class_name"]),
-            "confidence": conf,
+            "confidence": effective_conf,
             "position": pos,
             "bounding_box": box,
             "in_roi": in_corridor or in_path,
@@ -312,25 +343,12 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
     _sync_navigation_with_decision(nav_data, decision_telem, guidance_data.get("display_text", ""))
 
     # 9. Mã hóa frame_b64 và depth_b64 phục vụ xem trực tiếp trên web monitor (/view-phone)
-    import base64
-    frame_b64 = None
-    if frame_bgr is not None:
-        try:
-            _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
-            frame_b64 = base64.b64encode(buffer).decode('utf-8')
-        except Exception:
-            pass
-
-    depth_b64 = None
-    cur_dmap = dmap if dmap is not None else depth_service.get_or_create_display_depth_map(frame_bgr)
-    if cur_dmap is not None:
-        try:
-            d_norm = cv2.normalize(cur_dmap, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-            d_colored = cv2.applyColorMap(d_norm, cv2.COLORMAP_TURBO)
-            _, d_buf = cv2.imencode('.jpg', d_colored, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            depth_b64 = base64.b64encode(d_buf).decode('utf-8')
-        except Exception:
-            pass
+    # Bỏ qua hoàn toàn nếu không có Web Viewer kết nối (include_visuals=False)
+    frame_b64, depth_b64 = (
+        _encode_preview_visuals(image_bytes, frame_bgr, dmap, is_stream)
+        if include_visuals
+        else (None, None)
+    )
 
     processing_ms = round((time.perf_counter() - t0) * 1000.0, 1)
 

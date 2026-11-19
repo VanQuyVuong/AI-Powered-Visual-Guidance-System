@@ -35,3 +35,29 @@ class VisionAnalyzeResponse(BaseModel):
     detections: List[Detection]
     guidance: Optional[Guidance] = None
     error: Optional[dict] = None
+
+
+def build_light_client_payload(result: dict) -> dict:
+    """
+    Rút gọn payload gửi về Mobile/Edge client (~1-2KB, bỏ frame_b64/depth_b64 và telemetry nặng)
+    để giảm tối đa băng thông và độ trễ qua Wi-Fi.
+    """
+    nav = result.get("navigation")
+    light_nav = None
+    if isinstance(nav, dict):
+        light_nav = {
+            "direction": nav.get("direction", "straight"),
+            "confidence": nav.get("confidence", 0.9),
+            "text": nav.get("text"),
+        }
+    return {
+        "success": result.get("success", True),
+        "mode": result.get("mode"),
+        "processing_ms": result.get("processing_ms"),
+        "objects": result.get("objects"),
+        "has_person_in_roi": result.get("has_person_in_roi"),
+        "has_obstacle_in_roi": result.get("has_obstacle_in_roi"),
+        "guidance": result.get("guidance"),
+        "navigation": light_nav,
+        "img_size": result.get("img_size"),
+    }
