@@ -22,12 +22,15 @@ from typing import Dict, List, Optional, Any, Tuple
 SEMANTIC_PRIORITY: Dict[str, int] = {
     "stairs": 100,
     "step": 95,
+    "open_manhole": 98,
+    "dropoff": 96,
     "pothole": 95,
     "person": 90,
     "column": 85,
     "pillar": 85,
+    "mirror": 86,
+    "glass_door": 86,
     "door": 82,
-    "mirror": 84,
     "chair": 80,
     "table": 80,
     "dining table": 80,
@@ -194,9 +197,9 @@ class MultiModelFusionEngine:
             pos_val = str(cand.get("position", "center"))
             if c_name == "wall":
                 cand["is_danger"] = dist_val <= 1.00
-            elif c_name in ("stairs", "step", "dropoff", "pothole"):
+            elif c_name in ("stairs", "step", "dropoff", "pothole", "open_manhole"):
                 cand["is_danger"] = dist_val <= 2.40
-            elif c_name in ("column", "pillar", "mirror"):
+            elif c_name in ("column", "pillar", "mirror", "glass_door"):
                 cand["is_danger"] = dist_val <= 1.85
             elif c_name == "obstacle":
                 cand["is_danger"] = dist_val <= 1.50

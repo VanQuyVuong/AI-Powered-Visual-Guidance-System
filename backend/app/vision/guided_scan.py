@@ -23,8 +23,8 @@ SIDE_OBSTACLE_M = 1.65      # Vật cản ở 2 bên <= 1.65m
 ALERT_REPEAT_INTERVAL_S = 6.0   # Nhắc lại sau 6s nếu vẫn đứng trước vật cản
 CLEAR_REPEAT_INTERVAL_S = 6.5   # Nhắc lại "an toàn, đi thẳng" định kỳ mỗi 6.5s khi đang đi thẳng
 
-STEP_WORDS = ("bậc thềm", "bậc tam cấp", "cầu thang", "bậc thang", "ổ gà", "hố sụt", "hố sâu")
-GROUND_HAZARD_CLASSES = {"stairs", "step", "curb", "doorstep", "threshold", "pothole", "dropoff"}
+STEP_WORDS = ("bậc thềm", "bậc tam cấp", "cầu thang", "bậc thang", "ổ gà", "hố ga", "hố sụt", "hố sâu")
+GROUND_HAZARD_CLASSES = {"stairs", "step", "curb", "doorstep", "threshold", "pothole", "dropoff", "open_manhole"}
 WALL_CLASSES = {"wall"}
 
 

@@ -3,13 +3,14 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-# Tải model ở ngoài hàm để load 1 lần khi bật server
-# Thứ tự ưu tiên: Custom model -> YOLO11n (Nano siêu nhanh ~25ms cho real-time 4 model song song) -> YOLOv8n -> YOLO11s
+# Thứ tự ưu tiên: Model chỉ định -> Model fine-tune riêng (`guidance_model`) -> Open-Vocabulary YOLOE-26s -> YOLO11n COCO
 model_file = None
 candidates = [
     os.getenv("YOLO_MODEL"),
     "guidance_model.onnx",
     "guidance_model.pt",
+    "yoloe-26s-seg.pt",
+    "yoloe-26n-seg.pt",
     "yolo11n.pt",
     "yolov8n.pt",
     "yolo11s.pt",
@@ -17,13 +18,15 @@ candidates = [
     "yolo26n.pt",
 ]
 
+here_vision = os.path.dirname(__file__)
 for name in candidates:
     if not name:
         continue
     search_paths = [
         name,
-        os.path.join(os.path.dirname(__file__), "..", "..", name),
-        os.path.join(os.path.dirname(__file__), "..", "..", "..", name)
+        os.path.join(here_vision, name),
+        os.path.join(here_vision, "..", "..", name),
+        os.path.join(here_vision, "..", "..", "..", name),
     ]
     for p in search_paths:
         if os.path.exists(p):
@@ -36,7 +39,18 @@ if not model_file:
     model_file = "yolov8n.pt"
 
 print(f"Đang khởi tạo model YOLO: {model_file}...")
-model = YOLO(model_file)
+npz_prompt_path = os.path.join(here_vision, "yoloe_guidance_prompts.npz")
+if "yoloe" in os.path.basename(model_file).lower() and os.path.exists(npz_prompt_path):
+    try:
+        from ultralytics import YOLOE
+        model = YOLOE(model_file)
+        model.load_prompt_embeddings(npz_prompt_path)
+        print(f"✅ Đã nạp Open-Vocabulary YOLOE ({len(model.names)} lớp chỉ đường từ cache .npz)")
+    except Exception as _ye:
+        print(f"⚠️ Lỗi nạp YOLOE, lùi về YOLO thường: {_ye}")
+        model = YOLO("yolo11n.pt" if os.path.exists("yolo11n.pt") else model_file)
+else:
+    model = YOLO(model_file)
 
 from app.vision.model_scheduler import configure_cpu_threads
 

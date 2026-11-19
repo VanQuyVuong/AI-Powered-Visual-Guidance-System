@@ -36,8 +36,66 @@ OBSTACLE_CLASSES = {
     "dog", "cat", "car", "motorcycle", "bicycle", "bus", "truck",
     "door", "stairs", "stair", "step", "curb", "doorstep", "threshold",
     "stop sign", "traffic light", "fire hydrant",
-    "wall", "column", "pillar", "cabinet", "obstacle", "multi_obstacle", "pothole", "dropoff"
+    "wall", "column", "pillar", "cabinet", "obstacle", "multi_obstacle",
+    "pothole", "dropoff", "mirror", "glass_door", "open_manhole",
 }
+
+YOLO_CLASS_ALIASES = {
+    "staircase": "stairs",
+    "flight of stairs": "stairs",
+    "steps": "stairs",
+    "stair": "stairs",
+    "doorstep": "step",
+    "curb": "step",
+    "bump": "step",
+    "water puddle": "pothole",
+    "puddle": "pothole",
+    "open manhole": "open_manhole",
+    "manhole": "open_manhole",
+    "glass door": "glass_door",
+    "pillar": "column",
+    "pole": "column",
+    "bollard": "column",
+    "barrier": "obstacle",
+    "trash can": "obstacle",
+    "waste_container": "obstacle",
+}
+
+
+def _normalize_yolo_class(raw_name: str) -> str:
+    """Chuẩn hóa nhãn từ COCO / Open-Vocabulary YOLOE / ObstacleYOLO về từ vựng chuẩn của hệ thống."""
+    key = str(raw_name or "").lower().strip()
+    return YOLO_CLASS_ALIASES.get(key, key)
+
+
+def _filter_reflections_inside_mirrors(objects: list) -> list:
+    """Loại bỏ các vật thể ảo phản chiếu nằm lọt bên trong khung gương soi."""
+    mirror_boxes = [
+        o["bounding_box"] for o in objects if str(o.get("class_name", "")).lower() == "mirror"
+    ]
+    if not mirror_boxes:
+        return objects
+    kept = []
+    for obj in objects:
+        cname = str(obj.get("class_name", "")).lower()
+        if cname == "mirror":
+            kept.append(obj)
+            continue
+        bb = obj.get("bounding_box") or {}
+        bx1, by1, bx2, by2 = bb.get("x1", 0), bb.get("y1", 0), bb.get("x2", 0), bb.get("y2", 0)
+        area = float(max(1, (bx2 - bx1) * (by2 - by1)))
+        inside_mirror = False
+        for mb in mirror_boxes:
+            ix1 = max(bx1, mb.get("x1", 0))
+            iy1 = max(by1, mb.get("y1", 0))
+            ix2 = min(bx2, mb.get("x2", 0))
+            iy2 = min(by2, mb.get("y2", 0))
+            if ix2 > ix1 and iy2 > iy1 and float((ix2 - ix1) * (iy2 - iy1)) / area >= 0.55:
+                inside_mirror = True
+                break
+        if not inside_mirror:
+            kept.append(obj)
+    return kept
 
 # Các lớp đồ vật lớn
 LARGE_FALSE_POSITIVE_CLASSES = {"bed", "couch"}
@@ -164,7 +222,7 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False, include_visu
     has_obstacle_in_roi = False
 
     for det in raw_detections:
-        cname = det["class_name"].lower()
+        cname = _normalize_yolo_class(det["class_name"])
         conf = det["confidence"]
         box = det["bounding_box"]
 
@@ -184,30 +242,62 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False, include_visu
         if conf < min_conf:
             continue
 
+        bw = max(1, box["x2"] - box["x1"])
+        bh = max(1, box["y2"] - box["y1"])
+        area_ratio = float(bw * bh) / float(max(1, img_width * img_height))
+        bh_ratio = float(bh) / float(max(1, img_height))
+
+        # Bỏ gương trang trí nhỏ treo lệch mép trên tường không nằm trên đường đi
+        if cname in ("mirror", "glass_door") and area_ratio < 0.08 and bh_ratio < 0.35:
+            continue
+
+        # Với ổ gà / vũng nước từ Open-Vocabulary: kiểm tra ngữ cảnh mặt đường để không bắt nhầm bóng phản chiếu nền gạch
+        if cname == "pothole":
+            with depth_service._lock:
+                seg_snap = depth_service._latest_seg_map
+            if not depth_service._is_valid_pothole_box(box["x1"], box["y1"], box["x2"], box["y2"], img_width, img_height, seg_snap):
+                continue
+
         in_corridor = is_in_roi(box["x1"], box["y1"], box["x2"], box["y2"], img_width, img_height)
         pos = determine_position(box["x1"], box["x2"], img_width)
         is_person = (cname == "person")
 
-        # 2. Ưu tiên lấy khoảng cách mét tinh chỉnh theo Pixel Mask của EdgeSAM + Depth Anything V2,
-        # ĐỒNG THỜI đối chiếu chéo với khoảng cách hình học Pinhole qua `resolve_calibrated_distance`
-        # để chống báo gần sai lệch cho vật cản ở xa > 2.4m (VD: ghế cách 4-5 viên gạch) hoặc stale depth map.
-        pinhole_dist = estimate_distance_m(cname, box, img_width, img_height)
-        sam_mask_dist = sam_service.get_mask_refined_depth(box, dmap)
-        metric_dist = sam_mask_dist or depth_service.get_box_median_depth(box["x1"], box["y1"], box["x2"], box["y2"], dmap)
-        dist_m = resolve_calibrated_distance(cname, metric_dist, pinhole_dist, box, img_width, img_height)
+        # 2. Tính khoảng cách theo loại bề mặt:
+        # - Gương / cửa kính: đo dải viền khung bao (tránh bị phản chiếu phòng xa bên trong mặt kính đánh lừa)
+        # - Ổ gà / vũng nước: đo mép dưới gần bàn chân
+        # - Vật cản thông thường: ưu tiên EdgeSAM mask + Depth V2 hòa giải Pinhole qua `resolve_calibrated_distance`
+        sam_mask_dist = None
+        if cname in ("mirror", "glass_door"):
+            dist_m = depth_service.estimate_surface_ring_depth(
+                box["x1"], box["y1"], box["x2"], box["y2"], dmap, img_width, img_height
+            )
+            if pos == "center" and (cname == "glass_door" or bh_ratio >= 0.45):
+                in_corridor = True
+        elif cname == "pothole":
+            dist_m = depth_service._estimate_pothole_distance(
+                box["x1"], box["y1"], box["x2"], box["y2"], dmap, img_width, img_height
+            )
+            in_corridor = True
+        else:
+            pinhole_dist = estimate_distance_m(cname, box, img_width, img_height)
+            sam_mask_dist = sam_service.get_mask_refined_depth(box, dmap)
+            metric_dist = sam_mask_dist or depth_service.get_box_median_depth(box["x1"], box["y1"], box["x2"], box["y2"], dmap)
+            dist_m = resolve_calibrated_distance(cname, metric_dist, pinhole_dist, box, img_width, img_height)
 
         overlaps_center = (box["x1"] < 0.58 * img_width and box["x2"] > 0.42 * img_width)
-        # 3. Tiêu chí nguy hiểm chuẩn trong nhà: Chỉ cảnh báo chắn lối đi thẳng khi vật cản thực sự nằm ở làn giữa (hoặc tràn sâu vào trục giữa) và <= 2.25m.
-        # Khi người dùng đã rẽ phải/trái làm vật cản dạt sang bên (pos in left/right và không còn đè trục giữa), giải phóng in_path ngay!
         in_path = (pos == "center") or overlaps_center or (in_corridor and pos == "center")
-        is_danger = (in_path and dist_m <= 2.25) or (dist_m <= 1.65)
+        if cname in ("stairs", "step", "pothole", "dropoff", "open_manhole"):
+            is_danger = dist_m <= 2.40
+        elif cname in ("mirror", "glass_door"):
+            is_danger = dist_m <= 1.85 and (pos == "center" or overlaps_center)
+        else:
+            is_danger = (in_path and dist_m <= 2.25) or (dist_m <= 1.65)
 
-        # Chuẩn hóa confidence >= 0.40 cho các đồ vật nhỏ đã qua lọc
         effective_conf = max(conf, 0.42)
 
         all_objects.append({
-            "class_name": det["class_name"],
-            "class_name_vn": get_vietnamese_name(det["class_name"]),
+            "class_name": cname,
+            "class_name_vn": get_vietnamese_name(cname),
             "confidence": effective_conf,
             "position": pos,
             "bounding_box": box,
@@ -216,6 +306,8 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False, include_visu
             "is_danger": is_danger,
             "sam_mask_refined": sam_mask_dist is not None,
         })
+
+    all_objects = _filter_reflections_inside_mirrors(all_objects)
 
     # 4. CHẠY PHÁT HIỆN CỘT NHÀ, BỨC TƯỜNG, BẬC THỀM, CẦU THANG & VẬT CẢN LẠ (KẾT HỢP DEPTH + GEOMETRIC + EDGESAM)
     # Chỉ truyền các hộp bao của vật thể GẦN (<= 2.25m) vào known_boxes để bàn ghế ở xa (4m - 5.5m) trong lớp học

@@ -156,6 +156,8 @@ VOCAB = {
     "multi_obstacle": "nhiều vật cản",
     "obstacle": "vật cản",
     "mirror": "tấm gương",
+    "glass_door": "cửa kính",
+    "open_manhole": "hố ga hở",
     "pothole": "ổ gà",
     "dropoff": "hố sâu"
 }
