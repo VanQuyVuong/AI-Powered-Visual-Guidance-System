@@ -6,6 +6,7 @@ import cv2
 import torch
 from PIL import Image
 from typing import Optional, List, Dict, Any
+from app.vision.model_scheduler import aux_coordinator, configure_cpu_threads
 
 # Tắt cảnh báo symlink trên Windows
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
@@ -82,6 +83,7 @@ class DepthService:
         # Bộ đệm depth map, segmentation map và ổ gà mới nhất
         self._latest_depth_map: Optional[np.ndarray] = None
         self._latest_seg_map: Optional[np.ndarray] = None
+        self._latest_seg_hazards_norm: List[Dict[str, Any]] = []
         self._latest_potholes: List[Dict[str, Any]] = []
         self._last_computed_time: float = 0.0
         self._is_busy = False
@@ -105,6 +107,8 @@ class DepthService:
 
     def _load_model(self):
         t0 = time.time()
+        if self.device == "cpu":
+            configure_cpu_threads()
         try:
             from transformers import (
                 AutoImageProcessor,
@@ -172,26 +176,22 @@ class DepthService:
             small_rgb = cv2.cvtColor(cv2.resize(frame_bgr, (224, 168), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
             pil_img = Image.fromarray(small_rgb)
 
-            # 1. Tính Metric Depth Map ở mọi chu kỳ (ép size 252x252 là bội số của patch 14 để tránh processor phóng ngược lên 518x518)
+            # 1. Tính Metric Depth Map ở mọi chu kỳ (ép size 252x252 là bội số của patch 14)
             inputs = self.processor(
                 images=pil_img,
                 size={"height": 252, "width": 252},
                 return_tensors="pt",
             ).to(self.device)
-            with torch.no_grad():
+            with torch.inference_mode():
                 out = self.model(**inputs).predicted_depth
 
-            depth_map = torch.nn.functional.interpolate(
-                out.unsqueeze(1),
-                size=(h, w),
-                mode="bilinear",
-                align_corners=False,
-            ).squeeze().cpu().numpy()
+            raw_depth_np = out.squeeze().cpu().numpy().astype(np.float32, copy=False)
+            depth_map = cv2.resize(raw_depth_np, (w, h), interpolation=cv2.INTER_LINEAR)
+            np.clip(depth_map, 0.2, 15.0, out=depth_map)
 
-            depth_map = np.clip(depth_map, 0.2, 15.0)
-
-            # 2. Tính Semantic Segmentation Map (ép size 256x256 để giảm 4 lần RAM và tăng tốc 4 lần)
-            seg_map_resized = None
+            # 2. Tính Semantic Segmentation Map (256x256 -> logits 64x64) và rút trích luôn danh sách vật cản trên lưới 64x64
+            seg_ids_small = None
+            seg_hazards_norm = None
             if run_seg and self.seg_loaded and self.seg_model is not None and self.seg_processor is not None:
                 try:
                     s_inputs = self.seg_processor(
@@ -199,10 +199,10 @@ class DepthService:
                         size={"height": 256, "width": 256},
                         return_tensors="pt",
                     ).to(self.device)
-                    with torch.no_grad():
+                    with torch.inference_mode():
                         s_logits = self.seg_model(**s_inputs).logits
-                    seg_ids = s_logits.argmax(dim=1).squeeze(0).cpu().numpy().astype(np.int32)
-                    seg_map_resized = cv2.resize(seg_ids, (w, h), interpolation=cv2.INTER_NEAREST)
+                    seg_ids_small = s_logits.argmax(dim=1).squeeze(0).cpu().numpy().astype(np.int32)
+                    seg_hazards_norm = self._extract_seg_hazards_normalized(seg_ids_small, raw_depth_np)
                 except Exception as se:
                     print(f"[DepthService] Lỗi SegFormer: {se}")
 
@@ -211,7 +211,8 @@ class DepthService:
             if run_pothole and self.pothole_model is not None:
                 pothole_list = []
                 try:
-                    p_res = self.pothole_model(frame_bgr, verbose=False, conf=0.35, imgsz=288)
+                    with torch.inference_mode():
+                        p_res = self.pothole_model(frame_bgr, verbose=False, conf=0.35, imgsz=288)
                     for r in p_res:
                         for box in r.boxes:
                             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
@@ -231,8 +232,10 @@ class DepthService:
 
             with self._lock:
                 self._latest_depth_map = depth_map
-                if seg_map_resized is not None:
-                    self._latest_seg_map = seg_map_resized
+                if seg_ids_small is not None:
+                    self._latest_seg_map = seg_ids_small
+                if seg_hazards_norm is not None:
+                    self._latest_seg_hazards_norm = seg_hazards_norm
                 if pothole_list is not None:
                     self._latest_potholes = pothole_list
                 self._last_computed_time = time.time()
@@ -242,11 +245,81 @@ class DepthService:
             print(f"[DepthService] Lỗi tính depth map: {e}")
             return None
 
+    def _extract_seg_hazards_normalized(
+        self,
+        seg_small: np.ndarray,
+        depth_small: Optional[np.ndarray],
+    ) -> List[Dict[str, Any]]:
+        """
+        Rút trích sẵn vật thể cấu trúc SegFormer (cầu thang, cột nhà, cửa, tủ...) ngay trên lưới nhỏ (64x64)
+        để luồng chính Fusion không phải chạy np.unique() trên hàng trăm nghìn pixel ở mỗi frame (< 0.1ms).
+        """
+        if seg_small is None or seg_small.size == 0 or not self.seg_loaded or self.seg_model is None:
+            return []
+        sh, sw = seg_small.shape[:2]
+        d_small = None
+        if depth_small is not None and depth_small.size > 0:
+            d_small = cv2.resize(np.clip(depth_small, 0.2, 15.0), (sw, sh), interpolation=cv2.INTER_NEAREST)
+
+        id2label = getattr(self.seg_model.config, "id2label", {})
+        vals, counts = np.unique(seg_small, return_counts=True)
+        total_pixels = float(sh * sw)
+        extracted: List[Dict[str, Any]] = []
+
+        for cls_id, cnt in zip(vals, counts):
+            if cnt / total_pixels < 0.05:
+                continue
+            raw_label = id2label.get(int(cls_id), "").lower()
+            parts = [p.strip() for p in raw_label.replace(";", ",").split(",")]
+            matched = None
+            for p in parts:
+                if p in (
+                    "stairway", "stairs", "step", "escalator",
+                    "column", "pillar", "door", "double door",
+                    "cabinet", "wardrobe", "bookcase", "chest of drawers", "shelf",
+                ):
+                    matched = SEG_OBSTACLE_MAP[p]
+                    break
+            if not matched:
+                continue
+            cls_en, cls_vn = matched
+            mask = (seg_small == cls_id)
+            ys, xs = np.where(mask)
+            if ys.size == 0:
+                continue
+            x1n = float(np.min(xs)) / float(sw)
+            y1n = float(np.min(ys)) / float(sh)
+            x2n = float(np.max(xs) + 1) / float(sw)
+            y2n = float(np.max(ys) + 1) / float(sh)
+
+            if d_small is not None:
+                obj_d = d_small[mask]
+                raw_d = float(np.median(obj_d)) if obj_d.size > 0 else 1.8
+                dist_m = round(min(raw_d, 1.6), 1) if cls_en == "stairs" else round(raw_d, 1)
+            else:
+                dist_m = 1.6 if cls_en == "stairs" else 1.8
+
+            max_valid_d = 2.4 if cls_en == "stairs" else 2.2
+            if dist_m <= max_valid_d:
+                cx_n = 0.5 * (x1n + x2n)
+                pos = "center" if cls_en == "stairs" else ("left" if cx_n < 1.0 / 3.0 else ("right" if cx_n > 2.0 / 3.0 else "center"))
+                extracted.append({
+                    "class_name": cls_en,
+                    "class_name_vn": cls_vn,
+                    "confidence": 0.85 if cls_en == "stairs" else 0.82,
+                    "position": pos,
+                    "distance_m": dist_m,
+                    "norm_box": (x1n, y1n, min(1.0, x2n), min(1.0, y2n)),
+                    "in_roi": True,
+                    "is_danger": dist_m <= (2.4 if cls_en == "stairs" else 2.0),
+                    "is_unknown": True,
+                })
+        return extracted
+
     def trigger_async_compute(self, frame_bgr: np.ndarray):
         """
         Kích hoạt tính depth + segmentation hoàn toàn bất đồng bộ trong background thread
-        (trừ khi chưa có bản đồ độ sâu đầu tiên). Nhờ `_should_run_auxiliary_models` và kích thước `224x168`,
-        luồng cập nhật độ sâu nhanh gấp ~3 lần.
+        (trừ khi chưa có bản đồ độ sâu đầu tiên). Điều phối lệch pha với EdgeSAM để không nghẽn CPU.
         """
         if not self.is_loaded:
             return
@@ -255,15 +328,16 @@ class DepthService:
             has_first_map = self._latest_depth_map is not None
 
         if not has_first_map:
-            if not self._is_busy:
+            if not self._is_busy and aux_coordinator.try_acquire("depth"):
                 self._is_busy = True
                 try:
                     self.compute_depth_map(frame_bgr)
                 finally:
                     self._is_busy = False
+                    aux_coordinator.release("depth")
             return
 
-        if self._is_busy:
+        if self._is_busy or not aux_coordinator.try_acquire("depth"):
             return
 
         def _worker(img_copy):
@@ -272,8 +346,13 @@ class DepthService:
                 self.compute_depth_map(img_copy)
             finally:
                 self._is_busy = False
+                aux_coordinator.release("depth")
 
-        threading.Thread(target=_worker, args=(frame_bgr.copy(),), daemon=True).start()
+        try:
+            threading.Thread(target=_worker, args=(frame_bgr.copy(),), daemon=True).start()
+        except Exception:
+            self._is_busy = False
+            aux_coordinator.release("depth")
 
     def get_latest_depth_map(self) -> Optional[np.ndarray]:
         with self._lock:
@@ -305,11 +384,13 @@ class DepthService:
             roi = dmap[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]
 
         if roi.size > 0:
+            if roi.shape[0] > 40 and roi.shape[1] > 40:
+                roi = roi[::2, ::2]
             val = float(np.median(roi))
             return round(val, 1)
         return None
 
-    def _classify_front_region(self, x1: int, y1: int, x2: int, y2: int) -> tuple[str, str]:
+    def _classify_front_region(self, x1: int, y1: int, x2: int, y2: int, ref_w: int = 0, ref_h: int = 0) -> tuple[str, str]:
         """
         Dùng SegFormer để xác định chính xác vật cản trước mặt là 'bức tường' (wall),
         'cửa ra vào' (door), 'cầu thang' (stairs), 'bàn' (table), 'ghế' (chair) hay 'vật cản'.
@@ -321,8 +402,15 @@ class DepthService:
             return "obstacle", "vật cản"
 
         sh, sw = smap.shape[:2]
-        rx1, ry1 = max(0, min(sw - 1, x1)), max(0, min(sh - 1, y1))
-        rx2, ry2 = max(rx1 + 1, min(sw, x2)), max(ry1 + 1, min(sh, y2))
+        if ref_w > 0 and ref_h > 0 and (ref_w != sw or ref_h != sh):
+            rx1 = max(0, min(sw - 1, int(x1 * sw / float(ref_w))))
+            ry1 = max(0, min(sh - 1, int(y1 * sh / float(ref_h))))
+            rx2 = max(rx1 + 1, min(sw, int(x2 * sw / float(ref_w))))
+            ry2 = max(ry1 + 1, min(sh, int(y2 * sh / float(ref_h))))
+        else:
+            rx1, ry1 = max(0, min(sw - 1, x1)), max(0, min(sh - 1, y1))
+            rx2 = max(rx1 + 1, min(sw, x2))
+            ry2 = max(ry1 + 1, min(sh, y2))
         patch = smap[ry1:ry2, rx1:rx2]
         if patch.size == 0:
             return "obstacle", "vật cản"
@@ -405,67 +493,23 @@ class DepthService:
                         return True
             return False
 
-        # 1. Quét các vật thể/kiến trúc quan trọng từ SegFormer (cầu thang, cột nhà, cửa) mà YOLO bỏ sót
+        # 1. Quét các vật thể/kiến trúc quan trọng từ SegFormer (dùng danh sách đã rút trích sẵn trên lưới 64x64 -> < 0.05ms)
         with self._lock:
-            smap = self._latest_seg_map
+            seg_norm_list = list(self._latest_seg_hazards_norm)
 
         wall_found_by_seg = False
-        if smap is not None and self.seg_loaded and self.seg_model is not None:
-            id2label = getattr(self.seg_model.config, "id2label", {})
-            vals, counts = np.unique(smap, return_counts=True)
-            total_pixels = float(h * w)
-
-            for cls_id, cnt in zip(vals, counts):
-                if cnt / total_pixels < 0.05:  # Chiếm ít nhất 5% khung hình
-                    continue
-                raw_label = id2label.get(int(cls_id), "").lower()
-                parts = [p.strip() for p in raw_label.replace(";", ",").split(",")]
-
-                matched = None
-                for p in parts:
-                    # Dùng SegFormer cho cầu thang / cột nhà / cửa / tủ kệ (YOLO COCO không có các lớp này)
-                    if p in (
-                        "stairway", "stairs", "step", "escalator",
-                        "column", "pillar", "door", "double door",
-                        "cabinet", "wardrobe", "bookcase", "chest of drawers", "shelf",
-                    ):
-                        matched = SEG_OBSTACLE_MAP[p]
-                        break
-                if not matched:
-                    continue
-
-                cls_en, cls_vn = matched
-                mask = (smap == cls_id).astype(np.uint8)
-                ys, xs = np.where(mask > 0)
-                if ys.size == 0:
-                    continue
-                bx1, by1, bx2, by2 = int(np.min(xs)), int(np.min(ys)), int(np.max(xs)), int(np.max(ys))
-                if _is_covered_by_yolo(bx1, by1, bx2, by2, thresh=0.25):
-                    continue
-
-                if dmap is not None and dmap.size > 0:
-                    obj_depths = dmap[mask > 0]
-                    raw_d = float(np.median(obj_depths)) if obj_depths.size > 0 else 1.8
-                    dist_m = round(min(raw_d, 1.6), 1) if cls_en == "stairs" else round(raw_d, 1)
-                else:
-                    dist_m = 1.6 if cls_en == "stairs" else 1.8
-
-                max_valid_d = 2.4 if cls_en == "stairs" else 2.2
-                if dist_m <= max_valid_d:
-                    cx = (bx1 + bx2) / 2.0
-                    pos = "center" if cls_en == "stairs" else ("left" if cx < w / 3.0 else ("right" if cx > 2.0 * w / 3.0 else "center"))
-                    results.append({
-                        "class_name": cls_en,
-                        "class_name_vn": cls_vn,
-                        "confidence": 0.85 if cls_en == "stairs" else 0.82,
-                        "position": pos,
-                        "distance_m": dist_m,
-                        "bounding_box": {"x1": bx1, "y1": by1, "x2": bx2, "y2": by2},
-                        "in_roi": True,
-                        "is_danger": dist_m <= (2.4 if cls_en == "stairs" else 2.0),
-                        "is_unknown": True,
-                    })
-                    known_boxes.append({"x1": bx1, "y1": by1, "x2": bx2, "y2": by2})
+        for seg_item in seg_norm_list:
+            x1n, y1n, x2n, y2n = seg_item["norm_box"]
+            bx1 = int(x1n * w)
+            by1 = int(y1n * h)
+            bx2 = max(bx1 + 1, int(x2n * w))
+            by2 = max(by1 + 1, int(y2n * h))
+            if _is_covered_by_yolo(bx1, by1, bx2, by2, thresh=0.25):
+                continue
+            item_copy = {k: v for k, v in seg_item.items() if k != "norm_box"}
+            item_copy["bounding_box"] = {"x1": bx1, "y1": by1, "x2": bx2, "y2": by2}
+            results.append(item_copy)
+            known_boxes.append({"x1": bx1, "y1": by1, "x2": bx2, "y2": by2})
 
         # 2. PHÁT HIỆN HÌNH HỌC & QUANG HỌC: ƯU TIÊN CẦU THANG & HỐ SÂU TRƯỚC, SAU ĐÓ MỚI TỚI CỘT / TƯỜNG / VẬT CẢN
         wall_or_pillar_detected = wall_found_by_seg
@@ -550,7 +594,7 @@ class DepthService:
                 close_ratio = float(np.mean(center_lane < 0.98))
                 median_center_z = float(np.median(center_lane))
                 if close_ratio >= 0.42 or median_center_z <= 0.95:
-                    cls_en, cls_vn = self._classify_front_region(cx1, cy1, cx2, cy2)
+                    cls_en, cls_vn = self._classify_front_region(cx1, cy1, cx2, cy2, ref_w=dw, ref_h=dh)
                     results.append({
                         "class_name": cls_en,
                         "class_name_vn": cls_vn,
@@ -575,15 +619,17 @@ class DepthService:
         if dmap is None or dmap.size == 0:
             return {"has_depth": False, "lanes": {}}
 
-        dh, dw = dmap.shape[:2]
+        # Downsample bằng stride 3 khi độ phân giải lớn để giảm ~9x pixel quét median (~0.3ms thay vì 2ms)
+        sample_map = dmap[::3, ::3] if (dmap.shape[0] >= 180 and dmap.shape[1] >= 180) else dmap
+        dh, dw = sample_map.shape[:2]
         y1, y2 = int(dh * 0.22), int(dh * 0.82)
         x_left = int(dw * 0.33)
         x_right = int(dw * 0.67)
 
         slices = {
-            "left": dmap[y1:y2, 0:x_left],
-            "center": dmap[y1:y2, x_left:x_right],
-            "right": dmap[y1:y2, x_right:dw],
+            "left": sample_map[y1:y2, 0:x_left],
+            "center": sample_map[y1:y2, x_left:x_right],
+            "right": sample_map[y1:y2, x_right:dw],
         }
         lanes_info = {}
         for name, patch in slices.items():
