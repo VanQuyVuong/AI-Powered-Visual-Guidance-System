@@ -69,6 +69,18 @@ POTHOLE_NON_GROUND_LABELS = {
 STAIR_SEG_LABELS = {"stairway", "stairs", "step", "escalator", "grandstand"}
 FLAT_SURFACE_SEG_LABELS = {"floor", "flooring", "sidewalk", "pavement", "path", "ground", "earth", "road"}
 
+AUX_HAZARD_CLASS_MAP = {
+    "pothole": ("pothole", "ổ gà"),
+    "open_manhole": ("open_manhole", "hố ga hở"),
+    "hole": ("dropoff", "hố sâu"),
+    "bump": ("step", "gờ bậc"),
+    "pole": ("column", "cột trụ"),
+    "fence": ("obstacle", "hàng rào"),
+    "waste_container": ("obstacle", "vật cản"),
+    "animal": ("dog", "động vật"),
+}
+AUX_GROUND_DEFECT_CLASSES = {"pothole", "open_manhole", "dropoff", "step"}
+
 # Các lớp mặt phẳng đi lại an toàn (không coi là vật cản đứng chắn trước mặt)
 SAFE_GROUND_LABELS = {
     "floor", "flooring", "road", "route", "sidewalk", "pavement",
@@ -171,6 +183,9 @@ class DepthService:
             backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
             repo_root = os.path.abspath(os.path.join(backend_root, ".."))
             candidates = [
+                os.path.join(repo_root, "obstacle_yolo11n.pt"),
+                os.path.join(backend_root, "obstacle_yolo11n.pt"),
+                "obstacle_yolo11n.pt",
                 os.path.join(repo_root, "pothole.pt"),
                 os.path.join(backend_root, "pothole.pt"),
                 "pothole.pt",
@@ -178,10 +193,10 @@ class DepthService:
             for p in candidates:
                 if os.path.exists(p):
                     self.pothole_model = YOLO(p)
-                    print(f"[DepthService] ✅ Đã nạp mô hình phát hiện ổ gà: {p}")
+                    print(f"[DepthService] ✅ Đã nạp mô hình vật cản/ổ gà chuyên biệt: {p}")
                     break
         except Exception as e:
-            print(f"[DepthService] ⚠️ Không nạp được pothole.pt: {e}")
+            print(f"[DepthService] ⚠️ Không nạp được mô hình vật cản phụ trợ: {e}")
         finally:
             self.load_complete = True
 
@@ -245,36 +260,53 @@ class DepthService:
                 except Exception as se:
                     print(f"[DepthService] Lỗi SegFormer: {se}")
 
-            # 3. Chạy phát hiện ổ gà (Pothole) theo nhịp xen kẽ + lọc ngữ cảnh mặt đường SegFormer
+            # 3. Chạy phát hiện ổ gà, hố ga, gờ, cột trụ từ Obstacle/Pothole YOLO + lọc ngữ cảnh SegFormer
             pothole_list = None
             active_seg = seg_ids_small if seg_ids_small is not None else self._latest_seg_map
             if run_pothole and self.pothole_model is not None:
                 pothole_list = []
                 try:
                     with torch.inference_mode():
-                        p_res = self.pothole_model(frame_bgr, verbose=False, conf=0.30, imgsz=416)
+                        p_res = self.pothole_model(frame_bgr, verbose=False, conf=0.32, imgsz=416)
                     for r in p_res:
+                        names = getattr(r, "names", None) or getattr(self.pothole_model, "names", {})
                         for box in r.boxes:
+                            cls_idx = int(box.cls[0].item())
+                            raw_cls = str(names.get(cls_idx, "pothole")).lower().strip()
+                            cls_en, cls_vn = AUX_HAZARD_CLASS_MAP.get(raw_cls, ("pothole", "ổ gà"))
+                            conf_val = round(float(box.conf[0].item()), 2)
                             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                            if not self._is_valid_pothole_box(x1, y1, x2, y2, w, h, active_seg):
-                                continue
-                            dist = self._estimate_pothole_distance(x1, y1, x2, y2, depth_map, w, h)
-                            if dist > 3.2:
-                                continue
                             cx = 0.5 * (x1 + x2)
                             pos = "left" if cx < w / 3.0 else ("right" if cx > 2.0 * w / 3.0 else "center")
+
+                            if cls_en in AUX_GROUND_DEFECT_CLASSES:
+                                if not self._is_valid_pothole_box(x1, y1, x2, y2, w, h, active_seg):
+                                    continue
+                                dist = self._estimate_pothole_distance(x1, y1, x2, y2, depth_map, w, h)
+                                if dist > 3.2:
+                                    continue
+                                danger_d = 2.8 if cls_en in ("open_manhole", "dropoff") else 2.4
+                            else:
+                                if conf_val < 0.42:
+                                    continue
+                                dist = self.get_box_median_depth(x1, y1, x2, y2, depth_map) or 2.5
+                                if dist > 2.4:
+                                    continue
+                                danger_d = 1.85
+
                             pothole_list.append({
-                                "class_name": "pothole",
-                                "class_name_vn": "ổ gà",
-                                "confidence": round(float(box.conf[0].item()), 2),
+                                "class_name": cls_en,
+                                "class_name_vn": cls_vn,
+                                "confidence": conf_val,
                                 "position": pos,
                                 "distance_m": dist,
                                 "bounding_box": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
                                 "in_roi": True,
-                                "is_danger": dist <= 2.4,
-                                "source_model": "PotholeYOLO+DepthV2",
+                                "is_danger": dist <= danger_d,
+                                "source_model": "ObstacleYOLO11+DepthV2",
                             })
-                    if not pothole_list and active_seg is not None:
+                    has_ground_defect = any(p["class_name"] in AUX_GROUND_DEFECT_CLASSES for p in pothole_list)
+                    if not has_ground_defect and active_seg is not None:
                         puddle = self._detect_water_pothole_from_seg(active_seg, depth_map, w, h)
                         if puddle is not None:
                             pothole_list.append(puddle)
@@ -438,6 +470,41 @@ class DepthService:
             if any(p in ("water", "river", "lake") for p in parts):
                 ratios["water"] += r
         return ratios
+
+    def estimate_surface_ring_depth(
+        self,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        depth_map: Optional[np.ndarray],
+        w: int,
+        h: int,
+    ) -> float:
+        """
+        Đo khoảng cách tới bề mặt gương / cửa kính từ dải viền khung bao hai bên
+        thay vì đo vào lòng kính (nơi phản chiếu chiều sâu phòng xa 3m - 8m).
+        """
+        bh_n = float(max(1, y2 - y1)) / float(max(1, h))
+        bw = max(1, x2 - x1)
+        pad_x = max(4, int(bw * 0.08))
+        samples: List[float] = []
+        if depth_map is not None and depth_map.size > 0:
+            dh, dw = depth_map.shape[:2]
+            sy1 = max(0, min(dh - 1, int(y1 * dh / max(1, h))))
+            sy2 = max(sy1 + 1, min(dh, int(y2 * dh / max(1, h))))
+            sx1 = max(0, min(dw - 1, int(x1 * dw / max(1, w))))
+            sx2 = max(sx1 + 1, min(dw, int(x2 * dw / max(1, w))))
+            left_band = depth_map[sy1:sy2, max(0, sx1 - pad_x):min(dw, sx1 + pad_x)]
+            right_band = depth_map[sy1:sy2, max(0, sx2 - pad_x):min(dw, sx2 + pad_x)]
+            if left_band.size > 0:
+                samples.append(float(np.percentile(left_band, 25)))
+            if right_band.size > 0:
+                samples.append(float(np.percentile(right_band, 25)))
+        ring_d = float(np.median(samples)) if samples else 1.8
+        if bh_n >= 0.45:
+            ring_d = min(max(0.7, ring_d), 1.7)
+        return round(max(0.5, ring_d), 1)
 
     def _estimate_pothole_distance(
         self,
