@@ -153,6 +153,7 @@ fun SmartHatScreen() {
         // 1. Tầng CameraX Preview
         CameraPreviewView(
             isStreaming = isStreaming,
+            canProcessFrame = { webSocketService.canSendFrame() },
             onFrameCaptured = { bytes, base64 ->
                 latestJpegBytes = bytes
                 if (isStreaming) {

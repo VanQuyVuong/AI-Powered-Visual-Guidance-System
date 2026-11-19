@@ -28,12 +28,15 @@ import java.util.concurrent.Executors
 @Composable
 fun CameraPreviewView(
     isStreaming: Boolean,
+    canProcessFrame: () -> Boolean = { true },
     onFrameCaptured: (ByteArray, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    val currentCanProcessFrame by rememberUpdatedState(canProcessFrame)
+    val currentOnFrameCaptured by rememberUpdatedState(onFrameCaptured)
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     val previewView = remember {
         PreviewView(context).apply {
@@ -57,8 +60,9 @@ fun CameraPreviewView(
                 cameraProvider = cameraProvider,
                 previewView = previewView,
                 isStreaming = isStreaming,
+                canProcessFrame = { currentCanProcessFrame() },
                 executor = cameraExecutor,
-                onFrameCaptured = onFrameCaptured
+                onFrameCaptured = { bytes, b64 -> currentOnFrameCaptured(bytes, b64) }
             )
         }, ContextCompat.getMainExecutor(context))
     }
@@ -75,6 +79,7 @@ private fun bindCameraUseCases(
     cameraProvider: ProcessCameraProvider,
     previewView: PreviewView,
     isStreaming: Boolean,
+    canProcessFrame: () -> Boolean,
     executor: java.util.concurrent.ExecutorService,
     onFrameCaptured: (ByteArray, String) -> Unit
 ) {
@@ -89,9 +94,9 @@ private fun bindCameraUseCases(
             it.setSurfaceProvider(previewView.surfaceProvider)
         }
 
-    // Cấu hình ImageAnalysis đồng bộ cùng tỷ lệ 4:3 và cùng rotation để trường nhìn FOV khớp 100%
+    // Khóa độ phân giải tối ưu 480x640 (tỷ lệ 4:3) và chỉ nén JPEG khi server sẵn sàng nhận frame mới
     val imageAnalysis = ImageAnalysis.Builder()
-        .setTargetAspectRatio(targetRatio)
+        .setTargetResolution(Size(480, 640))
         .setTargetRotation(displayRotation)
         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
         .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
@@ -99,8 +104,8 @@ private fun bindCameraUseCases(
 
     imageAnalysis.setAnalyzer(executor) { imageProxy: ImageProxy ->
         try {
-            if (isStreaming) {
-                val jpegBytes = ImageUtils.imageProxyToJpegBytes(imageProxy, quality = 70)
+            if (isStreaming && canProcessFrame()) {
+                val jpegBytes = ImageUtils.imageProxyToJpegBytes(imageProxy, quality = 68)
                 if (jpegBytes != null) {
                     val base64 = ImageUtils.jpegBytesToBase64(jpegBytes)
                     onFrameCaptured(jpegBytes, base64)
