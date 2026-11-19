@@ -1411,6 +1411,10 @@
             const dt = fs.decision_telemetry || {};
 
             // Bước 1: 4 Nhánh Model AI
+            const headerMeta = document.getElementById('fusionHeaderMeta');
+            if (headerMeta && fs.fusion_latency_ms !== undefined) {
+                headerMeta.innerText = `4 AI Models Active • IoU Deduplication • EMA Smoothing • Fusion: ${fs.fusion_latency_ms}ms`;
+            }
             const rawCnt = fs.raw_candidate_count !== undefined ? fs.raw_candidate_count : (data.objects ? data.objects.length : 0);
             document.getElementById('fusionRawBadge').innerText = `${rawCnt} ứng viên`;
 
@@ -1731,7 +1735,8 @@
             try {
                 const payload = {
                     image_b64: latestFrameB64,
-                    detections: latestDetections
+                    detections: latestDetections,
+                    use_cached_if_fresh: Boolean(isAuto && !clickPoint)
                 };
                 if (clickPoint) {
                     payload.x = clickPoint.x;
