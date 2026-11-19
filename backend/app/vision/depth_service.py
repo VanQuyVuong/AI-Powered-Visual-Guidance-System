@@ -14,6 +14,8 @@ os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 DEPTH_MODEL_ID = "depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf"
 SEG_MODEL_ID = "nvidia/segformer-b0-finetuned-ade-512-512"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# Hệ số hiệu chuẩn độ sâu cho camera thực tế (có thể chỉnh trong .env bằng script calibrate)
+DEPTH_SCALE_FACTOR = float(os.getenv("DEPTH_SCALE_FACTOR", "1.0"))
 
 # Ánh xạ các lớp bề mặt/vật cản của SegFormer ADE20K sang nhãn chuẩn của hệ thống
 SEG_OBSTACLE_MAP = {
@@ -25,6 +27,8 @@ SEG_OBSTACLE_MAP = {
     "stairs": ("stairs", "cầu thang"),
     "step": ("stairs", "bậc thang"),
     "escalator": ("stairs", "thang cuốn"),
+    "grandstand": ("stairs", "cầu thang"),
+    "mirror": ("mirror", "tấm gương"),
     "column": ("column", "cột nhà"),
     "pillar": ("column", "cột nhà"),
     "cabinet": ("cabinet", "tủ"),
@@ -47,6 +51,23 @@ SEG_OBSTACLE_MAP = {
     "person": ("person", "người"),
     "individual": ("person", "người"),
 }
+
+# Nhãn nền đất/mặt đường nơi ổ gà / vũng nước thực tế có thể xuất hiện
+POTHOLE_GROUND_LABELS = {
+    "earth", "road", "route", "sidewalk", "pavement", "path",
+    "ground", "water", "sand", "grass", "field",
+}
+
+# Nhãn kiến trúc/vật thể không phải mặt đường (dùng lọc báo giả pothole trên cầu thang, cây cối, tường)
+POTHOLE_NON_GROUND_LABELS = {
+    "stairway", "stairs", "step", "escalator", "grandstand",
+    "tree", "plant", "wall", "building", "house", "sky", "person",
+    "sofa", "chair", "armchair", "table", "coffee table", "desk",
+    "cabinet", "door", "fence", "railing", "bannister", "mirror",
+}
+
+STAIR_SEG_LABELS = {"stairway", "stairs", "step", "escalator", "grandstand"}
+FLAT_SURFACE_SEG_LABELS = {"floor", "flooring", "sidewalk", "pavement", "path", "ground", "earth", "road"}
 
 # Các lớp mặt phẳng đi lại an toàn (không coi là vật cản đứng chắn trước mặt)
 SAFE_GROUND_LABELS = {
@@ -78,6 +99,7 @@ class DepthService:
 
         self.is_loaded = False
         self.seg_loaded = False
+        self.load_complete = False
         self._lock = threading.Lock()
 
         # Bộ đệm depth map, segmentation map và ổ gà mới nhất
@@ -146,9 +168,11 @@ class DepthService:
 
         try:
             from ultralytics import YOLO
-            here = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+            backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+            repo_root = os.path.abspath(os.path.join(backend_root, ".."))
             candidates = [
-                os.path.join(here, "pothole.pt"),
+                os.path.join(repo_root, "pothole.pt"),
+                os.path.join(backend_root, "pothole.pt"),
                 "pothole.pt",
             ]
             for p in candidates:
@@ -158,11 +182,13 @@ class DepthService:
                     break
         except Exception as e:
             print(f"[DepthService] ⚠️ Không nạp được pothole.pt: {e}")
+        finally:
+            self.load_complete = True
 
-    def compute_depth_map(self, frame_bgr: np.ndarray) -> Optional[np.ndarray]:
+    def compute_depth_map(self, frame_bgr: np.ndarray, force_aux: bool = False) -> Optional[np.ndarray]:
         """
         Tính toán bản đồ độ sâu (depth map) theo mét VÀ bản đồ phân đoạn bề mặt (SegFormer)
-        theo nhịp xen kẽ thông minh cho ảnh BGR đầu vào.
+        theo nhịp xen kẽ thông minh (hoặc ép chạy đủ mọi nhánh khi `force_aux=True` cho ảnh tĩnh).
         """
         if not self.is_loaded or self.model is None:
             return None
@@ -170,33 +196,46 @@ class DepthService:
         try:
             self._cycle_count += 1
             cycle_idx = self._cycle_count
-            run_seg, run_pothole = self._should_run_auxiliary_models(cycle_idx)
+            if force_aux:
+                run_seg, run_pothole = True, True
+            else:
+                run_seg, run_pothole = self._should_run_auxiliary_models(cycle_idx)
 
             h, w = frame_bgr.shape[:2]
-            small_rgb = cv2.cvtColor(cv2.resize(frame_bgr, (224, 168), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
+            # Giữ nguyên tỷ lệ khung hình dọc/ngang (bội số patch 14 cho ViT) để không bóp méo chiều sâu vật thể
+            if h > w:
+                d_w, d_h = 210, 280
+                seg_w, seg_h = 192, 256
+            else:
+                d_w, d_h = 280, 210
+                seg_w, seg_h = 256, 192
+
+            small_rgb = cv2.cvtColor(cv2.resize(frame_bgr, (d_w, d_h), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
             pil_img = Image.fromarray(small_rgb)
 
-            # 1. Tính Metric Depth Map ở mọi chu kỳ (ép size 252x252 là bội số của patch 14)
+            # 1. Tính Metric Depth Map ở mọi chu kỳ (giữ nguyên tỷ lệ khung hình, bội số patch 14)
             inputs = self.processor(
                 images=pil_img,
-                size={"height": 252, "width": 252},
+                size={"height": d_h, "width": d_w},
                 return_tensors="pt",
             ).to(self.device)
             with torch.inference_mode():
                 out = self.model(**inputs).predicted_depth
 
             raw_depth_np = out.squeeze().cpu().numpy().astype(np.float32, copy=False)
+            if DEPTH_SCALE_FACTOR != 1.0:
+                raw_depth_np = raw_depth_np * DEPTH_SCALE_FACTOR
             depth_map = cv2.resize(raw_depth_np, (w, h), interpolation=cv2.INTER_LINEAR)
             np.clip(depth_map, 0.2, 15.0, out=depth_map)
 
-            # 2. Tính Semantic Segmentation Map (256x256 -> logits 64x64) và rút trích luôn danh sách vật cản trên lưới 64x64
+            # 2. Tính Semantic Segmentation Map giữ tỷ lệ khung hình -> rút trích trực tiếp trên logits nhỏ
             seg_ids_small = None
             seg_hazards_norm = None
             if run_seg and self.seg_loaded and self.seg_model is not None and self.seg_processor is not None:
                 try:
                     s_inputs = self.seg_processor(
                         images=pil_img,
-                        size={"height": 256, "width": 256},
+                        size={"height": seg_h, "width": seg_w},
                         return_tensors="pt",
                     ).to(self.device)
                     with torch.inference_mode():
@@ -206,27 +245,39 @@ class DepthService:
                 except Exception as se:
                     print(f"[DepthService] Lỗi SegFormer: {se}")
 
-            # 3. Chạy phát hiện ổ gà (Pothole) theo nhịp xen kẽ
+            # 3. Chạy phát hiện ổ gà (Pothole) theo nhịp xen kẽ + lọc ngữ cảnh mặt đường SegFormer
             pothole_list = None
+            active_seg = seg_ids_small if seg_ids_small is not None else self._latest_seg_map
             if run_pothole and self.pothole_model is not None:
                 pothole_list = []
                 try:
                     with torch.inference_mode():
-                        p_res = self.pothole_model(frame_bgr, verbose=False, conf=0.35, imgsz=288)
+                        p_res = self.pothole_model(frame_bgr, verbose=False, conf=0.30, imgsz=416)
                     for r in p_res:
                         for box in r.boxes:
                             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                            dist = self.get_box_median_depth(x1, y1, x2, y2, depth_map) or 1.8
+                            if not self._is_valid_pothole_box(x1, y1, x2, y2, w, h, active_seg):
+                                continue
+                            dist = self._estimate_pothole_distance(x1, y1, x2, y2, depth_map, w, h)
+                            if dist > 3.2:
+                                continue
+                            cx = 0.5 * (x1 + x2)
+                            pos = "left" if cx < w / 3.0 else ("right" if cx > 2.0 * w / 3.0 else "center")
                             pothole_list.append({
                                 "class_name": "pothole",
                                 "class_name_vn": "ổ gà",
                                 "confidence": round(float(box.conf[0].item()), 2),
-                                "position": "center",
+                                "position": pos,
                                 "distance_m": dist,
                                 "bounding_box": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
                                 "in_roi": True,
-                                "is_danger": dist <= 3.5,
+                                "is_danger": dist <= 2.4,
+                                "source_model": "PotholeYOLO+DepthV2",
                             })
+                    if not pothole_list and active_seg is not None:
+                        puddle = self._detect_water_pothole_from_seg(active_seg, depth_map, w, h)
+                        if puddle is not None:
+                            pothole_list.append(puddle)
                 except Exception:
                     pass
 
@@ -267,12 +318,23 @@ class DepthService:
         extracted: List[Dict[str, Any]] = []
 
         for cls_id, cnt in zip(vals, counts):
-            if cnt / total_pixels < 0.05:
+            pix_ratio = cnt / total_pixels
+            if pix_ratio < 0.018:
                 continue
             raw_label = id2label.get(int(cls_id), "").lower()
             parts = [p.strip() for p in raw_label.replace(";", ",").split(",")]
             matched = None
+            is_mirror_cls = False
+            is_grandstand_cls = False
             for p in parts:
+                if p == "mirror":
+                    matched = SEG_OBSTACLE_MAP[p]
+                    is_mirror_cls = True
+                    break
+                if p == "grandstand":
+                    matched = SEG_OBSTACLE_MAP[p]
+                    is_grandstand_cls = True
+                    break
                 if p in (
                     "stairway", "stairs", "step", "escalator",
                     "column", "pillar", "door", "double door",
@@ -291,30 +353,218 @@ class DepthService:
             y1n = float(np.min(ys)) / float(sh)
             x2n = float(np.max(xs) + 1) / float(sw)
             y2n = float(np.max(ys) + 1) / float(sh)
+            box_w_n = max(0.05, x2n - x1n)
+            box_h_n = max(0.05, y2n - y1n)
+            min_ratio = (0.018 if (box_h_n >= 0.55 and box_w_n >= 0.40) else 0.028) if is_mirror_cls else (0.08 if is_grandstand_cls else 0.05)
+            if pix_ratio < min_ratio:
+                continue
 
-            if d_small is not None:
+            if is_mirror_cls:
+                # Bên trong gương phản chiếu chiều sâu phòng nên phải đo theo viền khung gương / chiều cao gương
+                ring_d = 2.2
+                if d_small is not None:
+                    mask_u8 = mask.astype(np.uint8)
+                    ring = (cv2.dilate(mask_u8, np.ones((7, 7), np.uint8)) > 0) & (~mask)
+                    if np.any(ring):
+                        ring_d = float(np.percentile(d_small[ring], 25))
+                if pix_ratio >= 0.15 or box_h_n >= 0.45:
+                    dist_m = round(min(max(0.7, ring_d), 1.7), 1)
+                else:
+                    dist_m = round(ring_d, 1)
+            elif d_small is not None:
                 obj_d = d_small[mask]
                 raw_d = float(np.median(obj_d)) if obj_d.size > 0 else 1.8
                 dist_m = round(min(raw_d, 1.6), 1) if cls_en == "stairs" else round(raw_d, 1)
             else:
                 dist_m = 1.6 if cls_en == "stairs" else 1.8
 
-            max_valid_d = 2.4 if cls_en == "stairs" else 2.2
+            max_valid_d = 2.5 if cls_en == "mirror" else (2.4 if cls_en == "stairs" else 2.2)
             if dist_m <= max_valid_d:
                 cx_n = 0.5 * (x1n + x2n)
-                pos = "center" if cls_en == "stairs" else ("left" if cx_n < 1.0 / 3.0 else ("right" if cx_n > 2.0 / 3.0 else "center"))
+                pos = "center" if cls_en in ("stairs", "mirror") else ("left" if cx_n < 1.0 / 3.0 else ("right" if cx_n > 2.0 / 3.0 else "center"))
                 extracted.append({
                     "class_name": cls_en,
                     "class_name_vn": cls_vn,
-                    "confidence": 0.85 if cls_en == "stairs" else 0.82,
+                    "confidence": 0.85 if cls_en in ("stairs", "mirror") else 0.82,
                     "position": pos,
                     "distance_m": dist_m,
                     "norm_box": (x1n, y1n, min(1.0, x2n), min(1.0, y2n)),
                     "in_roi": True,
-                    "is_danger": dist_m <= (2.4 if cls_en == "stairs" else 2.0),
+                    "is_danger": dist_m <= (2.4 if cls_en == "stairs" else (1.85 if cls_en == "mirror" else 2.0)),
                     "is_unknown": True,
                 })
         return extracted
+
+    def _get_seg_box_label_ratios(
+        self,
+        seg_map: np.ndarray,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        img_w: int,
+        img_h: int,
+    ) -> Dict[str, float]:
+        """Tính tỷ lệ các nhóm nhãn SegFormer bên trong một bounding box ảnh gốc."""
+        if seg_map is None or seg_map.size == 0 or self.seg_model is None:
+            return {}
+        sh, sw = seg_map.shape[:2]
+        sx1 = max(0, min(sw - 1, int(x1 * sw / max(1, img_w))))
+        sy1 = max(0, min(sh - 1, int(y1 * sh / max(1, img_h))))
+        sx2 = max(sx1 + 1, min(sw, int(np.ceil(x2 * sw / max(1, img_w)))))
+        sy2 = max(sy1 + 1, min(sh, int(np.ceil(y2 * sh / max(1, img_h)))))
+        patch = seg_map[sy1:sy2, sx1:sx2]
+        if patch.size == 0:
+            return {}
+
+        id2label = getattr(self.seg_model.config, "id2label", {})
+        vals, counts = np.unique(patch, return_counts=True)
+        total = float(patch.size)
+        ratios = {"stair": 0.0, "flat": 0.0, "wall": 0.0, "ground": 0.0, "non_ground": 0.0, "water": 0.0}
+        for cid, cnt in zip(vals, counts):
+            r = float(cnt) / total
+            raw = id2label.get(int(cid), "").lower()
+            parts = [p.strip() for p in raw.replace(";", ",").split(",")]
+            if any(p in STAIR_SEG_LABELS for p in parts):
+                ratios["stair"] += r
+            if any(p in FLAT_SURFACE_SEG_LABELS for p in parts):
+                ratios["flat"] += r
+            if any(p == "wall" for p in parts):
+                ratios["wall"] += r
+            if any(p in POTHOLE_GROUND_LABELS for p in parts):
+                ratios["ground"] += r
+            if any(p in POTHOLE_NON_GROUND_LABELS for p in parts):
+                ratios["non_ground"] += r
+            if any(p in ("water", "river", "lake") for p in parts):
+                ratios["water"] += r
+        return ratios
+
+    def _estimate_pothole_distance(
+        self,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        depth_map: np.ndarray,
+        w: int,
+        h: int,
+    ) -> float:
+        """Đo khoảng cách ổ gà ở phần mép gần dưới chân (không lấy nền đường xa ở nửa trên hộp)."""
+        bw = max(1, x2 - x1)
+        bh = max(1, y2 - y1)
+        px1 = max(0, min(w - 1, int(x1 + bw * 0.15)))
+        px2 = max(px1 + 1, min(w, int(x2 - bw * 0.15)))
+        py1 = max(0, min(h - 1, int(y1 + bh * 0.55)))
+        py2 = max(py1 + 1, min(h, int(y1 + bh * 0.92)))
+        patch = depth_map[py1:py2, px1:px2] if depth_map is not None else np.array([])
+        dist = float(np.percentile(patch, 25)) if patch.size > 0 else 1.8
+        if y2 >= int(h * 0.80):
+            dist = min(dist, 2.0)
+        return round(max(0.4, dist), 1)
+
+    def _is_valid_pothole_box(
+        self,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        w: int,
+        h: int,
+        seg_map: Optional[np.ndarray],
+    ) -> bool:
+        """Lọc bỏ hộp ổ gà giả nằm ở nửa trên ảnh, sát mép hẹp hoặc trên cầu thang/tường/nền gạch trong nhà."""
+        area_ratio = float(max(1, (x2 - x1) * (y2 - y1))) / float(max(1, w * h))
+        if y2 < int(h * 0.42) or area_ratio > 0.90:
+            return False
+        if x2 < int(w * 0.18) or x1 > int(w * 0.82):
+            return False
+        if seg_map is None or not self.seg_loaded:
+            return True
+        ratios = self._get_seg_box_label_ratios(seg_map, x1, y1, x2, y2, w, h)
+        if not ratios:
+            return True
+        if ratios["non_ground"] >= 0.35:
+            return False
+        if ratios["non_ground"] >= 0.15 and ratios["ground"] < 0.20:
+            return False
+        return True
+
+    def _detect_water_pothole_from_seg(
+        self,
+        seg_map: np.ndarray,
+        depth_map: np.ndarray,
+        w: int,
+        h: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Phát hiện hố ngập nước trên đường đất/nhựa khi Pothole YOLO bỏ sót nhưng SegFormer thấy vũng nước lớn dưới chân."""
+        if seg_map is None or seg_map.size == 0 or self.seg_model is None:
+            return None
+        sh, sw = seg_map.shape[:2]
+        y1s, y2s = int(sh * 0.45), int(sh * 0.95)
+        x1s, x2s = int(sw * 0.10), int(sw * 0.90)
+        corridor = seg_map[y1s:y2s, x1s:x2s]
+        if corridor.size == 0:
+            return None
+
+        id2label = getattr(self.seg_model.config, "id2label", {})
+        water_mask = np.zeros_like(corridor, dtype=bool)
+        earth_road_ratio = 0.0
+        vals, counts = np.unique(corridor, return_counts=True)
+        for cid, cnt in zip(vals, counts):
+            parts = [p.strip() for p in id2label.get(int(cid), "").lower().replace(";", ",").split(",")]
+            if any(p == "water" for p in parts):
+                water_mask |= (corridor == cid)
+            if any(p in ("earth", "road", "route", "sidewalk", "pavement", "ground", "sand") for p in parts):
+                earth_road_ratio += float(cnt) / float(corridor.size)
+
+        water_ratio = float(np.mean(water_mask))
+        if water_ratio < 0.20 or earth_road_ratio < 0.08:
+            return None
+
+        ys, xs = np.where(water_mask)
+        if ys.size == 0:
+            return None
+        bx1 = int((x1s + int(np.min(xs))) * w / max(1, sw))
+        by1 = int((y1s + int(np.min(ys))) * h / max(1, sh))
+        bx2 = int((x1s + int(np.max(xs)) + 1) * w / max(1, sw))
+        by2 = int((y1s + int(np.max(ys)) + 1) * h / max(1, sh))
+        dist = self.get_box_median_depth(bx1, by1, bx2, by2, depth_map) or 1.6
+        return {
+            "class_name": "pothole",
+            "class_name_vn": "ổ gà",
+            "confidence": 0.80,
+            "position": "center",
+            "distance_m": round(min(dist, 2.2), 1),
+            "bounding_box": {"x1": bx1, "y1": by1, "x2": bx2, "y2": by2},
+            "in_roi": True,
+            "is_danger": True,
+            "source_model": "SegFormer+WaterPuddle",
+        }
+
+    def _is_stairs_suppressed_by_floor_seg(
+        self,
+        stairs_hazard: Dict[str, Any],
+        w: int,
+        h: int,
+    ) -> bool:
+        """Đối chiếu lại bằng SegFormer: loại bỏ báo giả cầu thang khi bề mặt trong hộp rõ ràng là nền gạch phẳng/tường."""
+        with self._lock:
+            seg_map = self._latest_seg_map
+        if seg_map is None or not self.seg_loaded:
+            return False
+        bb = stairs_hazard.get("bounding_box") or {}
+        ratios = self._get_seg_box_label_ratios(
+            seg_map, bb.get("x1", 0), bb.get("y1", 0), bb.get("x2", w), bb.get("y2", h), w, h
+        )
+        if not ratios:
+            return False
+        if ratios["stair"] >= 0.03:
+            return False
+        if ratios["flat"] >= 0.48:
+            return True
+        if ratios["wall"] >= 0.45 and ratios["flat"] >= 0.15:
+            return True
+        return False
 
     def trigger_async_compute(self, frame_bgr: np.ndarray):
         """
@@ -374,10 +624,11 @@ class DepthService:
 
         h, w = dmap.shape[:2]
         bw, bh = max(1, x2 - x1), max(1, y2 - y1)
-        cx1 = max(0, min(w - 1, int(x1 + 0.2 * bw)))
-        cy1 = max(0, min(h - 1, int(y1 + 0.2 * bh)))
-        cx2 = max(cx1 + 1, min(w, int(x2 - 0.2 * bw)))
-        cy2 = max(cy1 + 1, min(h, int(y2 - 0.2 * bh)))
+        # Lấy vùng lõi thân trên-giữa (y: 18%..68%, x: 22%..78%) để tránh dính pixel sàn nhà phía trước chân ghế/bàn
+        cx1 = max(0, min(w - 1, int(x1 + 0.22 * bw)))
+        cy1 = max(0, min(h - 1, int(y1 + 0.18 * bh)))
+        cx2 = max(cx1 + 1, min(w, int(x2 - 0.22 * bw)))
+        cy2 = max(cy1 + 1, min(h, int(y1 + 0.68 * bh)))
 
         roi = dmap[cy1:cy2, cx1:cx2]
         if roi.size == 0:
@@ -532,9 +783,25 @@ class DepthService:
                 stairs_hazard = geometric_hazard_detector.detect_stairs_and_curbs(
                     frame_bgr, dmap, known_boxes=known_boxes
                 )
-                if stairs_hazard:
+                if stairs_hazard and not self._is_stairs_suppressed_by_floor_seg(stairs_hazard, w, h):
                     results.append(stairs_hazard)
                     known_boxes.append(stairs_hazard["bounding_box"])
+                    has_center_known_obstacle = True
+
+            # A1b. Hợp nhất kết quả Pothole YOLO / Vũng nước ngập sâu từ luồng Pothole
+            with self._lock:
+                potholes_copy = [dict(p) for p in self._latest_potholes]
+            for ph in potholes_copy:
+                pb = ph.get("bounding_box") or {}
+                px1 = max(0, min(w - 1, int(pb.get("x1", 0))))
+                py1 = max(0, min(h - 1, int(pb.get("y1", 0))))
+                px2 = max(px1 + 1, min(w, int(pb.get("x2", w))))
+                py2 = max(py1 + 1, min(h, int(pb.get("y2", h))))
+                if _is_covered_by_yolo(px1, py1, px2, py2, thresh=0.35):
+                    continue
+                results.append(ph)
+                known_boxes.append({"x1": px1, "y1": py1, "x2": px2, "y2": py2})
+                if ph.get("position", "center") == "center":
                     has_center_known_obstacle = True
 
             # A2. Kiểm tra Hố sâu / Sụt lún / Bậc hụt chân dưới đất (Ground Drop-off):

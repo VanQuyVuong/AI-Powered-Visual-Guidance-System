@@ -27,6 +27,7 @@ SEMANTIC_PRIORITY: Dict[str, int] = {
     "column": 85,
     "pillar": 85,
     "door": 82,
+    "mirror": 84,
     "chair": 80,
     "table": 80,
     "dining table": 80,
@@ -193,9 +194,9 @@ class MultiModelFusionEngine:
             pos_val = str(cand.get("position", "center"))
             if c_name == "wall":
                 cand["is_danger"] = dist_val <= 1.00
-            elif c_name in ("stairs", "step", "dropoff"):
+            elif c_name in ("stairs", "step", "dropoff", "pothole"):
                 cand["is_danger"] = dist_val <= 2.40
-            elif c_name in ("column", "pillar"):
+            elif c_name in ("column", "pillar", "mirror"):
                 cand["is_danger"] = dist_val <= 1.85
             elif c_name == "obstacle":
                 cand["is_danger"] = dist_val <= 1.50

@@ -155,6 +155,7 @@ VOCAB = {
     "threshold": "bậc thềm",
     "multi_obstacle": "nhiều vật cản",
     "obstacle": "vật cản",
+    "mirror": "tấm gương",
     "pothole": "ổ gà",
     "dropoff": "hố sâu"
 }
