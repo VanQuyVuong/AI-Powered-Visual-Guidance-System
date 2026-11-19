@@ -306,3 +306,47 @@ def test_depth_service_pothole_mirror_and_floor_filtering():
     assert get_vietnamese_name("mirror") == "tấm gương"
 
 
+def test_step1_yoloe_aliases_mirror_ring_and_training_remap():
+    """Kiểm tra chuẩn hóa nhãn YOLOE/ObstacleYOLO, lọc vật ảo trong gương, đo viền gương và bảng ánh xạ dataset train."""
+    from types import SimpleNamespace
+    import numpy as np
+    from app.vision.pipeline import _normalize_yolo_class, _filter_reflections_inside_mirrors
+    from app.vision.depth_service import DepthService
+    from app.vision.decision_engine import get_vietnamese_name
+    from training.prepare_and_train_yolo import map_label_to_custom_class
+
+    assert _normalize_yolo_class("flight of stairs") == "stairs"
+    assert _normalize_yolo_class("water puddle") == "pothole"
+    assert _normalize_yolo_class("open manhole") == "open_manhole"
+    assert _normalize_yolo_class("glass door") == "glass_door"
+    assert _normalize_yolo_class("bump") == "step"
+    assert _normalize_yolo_class("pole") == "column"
+    assert get_vietnamese_name("glass_door") == "cửa kính"
+    assert get_vietnamese_name("open_manhole") == "hố ga hở"
+
+    # Vật ảo nằm trong khung gương bị lọc, vật đứng ngoài/trước gương vẫn được giữ lại
+    objs = [
+        {"class_name": "mirror", "bounding_box": {"x1": 60, "y1": 10, "x2": 580, "y2": 460}},
+        {"class_name": "chair", "bounding_box": {"x1": 150, "y1": 220, "x2": 310, "y2": 390}},  # lọt trong gương
+        {"class_name": "chair", "bounding_box": {"x1": 0, "y1": 260, "x2": 55, "y2": 450}},     # ở bên ngoài gương
+    ]
+    filtered = _filter_reflections_inside_mirrors(objs)
+    assert len(filtered) == 2
+    assert [o["class_name"] for o in filtered] == ["mirror", "chair"]
+    assert filtered[1]["bounding_box"]["x1"] == 0
+
+    # Đo độ sâu mép viền gương lớn không bị lòng gương 6.0m đánh lừa
+    svc = DepthService.__new__(DepthService)
+    dmap = np.full((480, 640), 1.5, dtype=np.float32)
+    dmap[40:440, 100:540] = 6.0
+    ring_d = svc.estimate_surface_ring_depth(80, 20, 560, 450, dmap, 640, 480)
+    assert ring_d <= 1.7
+
+    # Mapping dataset 25 lớp -> 15 lớp chuẩn train
+    assert map_label_to_custom_class("Electrical Pole") == "column"
+    assert map_label_to_custom_class("Manhole") == "open_manhole"
+    assert map_label_to_custom_class("Stairs") == "stairs"
+    assert map_label_to_custom_class("Motorcycle") == "vehicle"
+
+
+
