@@ -30,9 +30,21 @@ CALIBRATION_NAME_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*m(?=\b|_|\.)", re.IGNOREC
 
 EXPECTED_RULES = {
     "cau_thang": {"label": "Cầu thang / Bậc thềm", "expect_any": {"stairs", "step", "curb", "doorstep"}},
-    "ho_sau": {"label": "Hố sâu / Ổ gà", "expect_any": {"dropoff", "pothole"}},
-    "tuong_cot": {"label": "Tường / Cột / Vật cản", "expect_any": {"wall", "column", "pillar", "obstacle"}},
-    "nen_gach": {"label": "Nền gạch / Lối đi trống", "forbid_any": {"stairs", "step", "wall", "dropoff"}},
+    "ho_sau": {"label": "Hố sâu / Ổ gà", "expect_any": {"dropoff", "pothole", "open_manhole"}},
+    "nap_cong": {"label": "Nắp cống / Hố ga", "expect_any": {"open_manhole", "pothole", "dropoff"}},
+    "guong_kinh": {"label": "Gương / Cửa kính", "expect_any": {"mirror", "glass_door", "door"}},
+    "tuong_cot": {
+        "label": "Tường / Cột / Rào chắn / Vật cản",
+        "expect_any": {"wall", "column", "pillar", "obstacle", "door", "cabinet", "bench", "chair"},
+    },
+    "xe_co_nguoi": {
+        "label": "Người / Xe cộ / Ghế / Động vật",
+        "expect_any": {"person", "motorcycle", "bicycle", "car", "bus", "truck", "bench", "chair", "dog", "obstacle", "column"},
+    },
+    "nen_gach": {
+        "label": "Nền gạch / Lối đi trống",
+        "forbid_any": {"stairs", "step", "wall", "dropoff", "pothole", "open_manhole", "mirror"},
+    },
     "vat_can_xa": {"label": "Vật cản xa (> 2.4m)", "expect_no_danger_if_far": True},
 }
 
@@ -73,7 +85,7 @@ def evaluate_category(category: str, result: Dict[str, Any], true_dist_m: Option
         .get("state_code", "CLEAR")
     )
 
-    if category in ("cau_thang", "ho_sau", "tuong_cot"):
+    if category in ("cau_thang", "ho_sau", "nap_cong", "guong_kinh", "tuong_cot", "xe_co_nguoi"):
         expected = EXPECTED_RULES[category]["expect_any"]
         if classes & expected:
             return "PASS", f"Bắt trúng {sorted(classes & expected)}"
