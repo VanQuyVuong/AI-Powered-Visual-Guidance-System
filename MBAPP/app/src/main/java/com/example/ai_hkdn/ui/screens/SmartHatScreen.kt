@@ -81,7 +81,7 @@ fun SmartHatScreen() {
         mutableStateOf(runCatching { ProcessingMode.valueOf(saved ?: "") }.getOrDefault(ProcessingMode.EDGE_NPU))
     }
     var serverIp by remember {
-        mutableStateOf(prefs.getString("server_ip", "192.168.1.49:8000") ?: "192.168.1.49:8000")
+        mutableStateOf(prefs.getString("server_ip", "192.168.1.121:8000") ?: "192.168.1.121:8000")
     }
     var telemetryEnabled by remember {
         mutableStateOf(prefs.getBoolean("telemetry_enabled", true))
@@ -672,7 +672,7 @@ private fun EdgeAndServerConfigDialog(
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     AssistChip(onClick = { textIp = "127.0.0.1:8000" }, label = { Text("USB") })
-                    AssistChip(onClick = { textIp = "192.168.1.49:8000" }, label = { Text("Wi-Fi") })
+                    AssistChip(onClick = { textIp = "192.168.1.121:8000" }, label = { Text("Wi-Fi Laptop") })
                 }
             }
         },

@@ -45,33 +45,36 @@ class EdgeVisionPipeline(
 
     private val tag = "EdgeVisionPipeline"
 
-    // Preallocated direct FloatBuffers (Zero-GC per frame)
-    private val yoloBuf: FloatBuffer = ByteBuffer.allocateDirect(1 * 3 * 320 * 320 * 4)
-        .order(ByteOrder.nativeOrder()).asFloatBuffer()
-    private val depthBuf: FloatBuffer = ByteBuffer.allocateDirect(1 * 3 * 252 * 252 * 4)
-        .order(ByteOrder.nativeOrder()).asFloatBuffer()
-    private val segBuf: FloatBuffer = ByteBuffer.allocateDirect(1 * 3 * 256 * 256 * 4)
-        .order(ByteOrder.nativeOrder()).asFloatBuffer()
+    // Preallocated direct FloatBuffers (tự khớp kích thước tối đa từ manifest, zero-GC per frame)
+    private var yoloBufSz = 320
+    private var yoloBuf: FloatBuffer = allocFloatBuf(1 * 3 * 320 * 320)
+    private var yoloPixels = IntArray(320 * 320)
+    private var letterboxBmp: Bitmap = Bitmap.createBitmap(320, 320, Bitmap.Config.ARGB_8888)
+    private var letterboxCanvas = Canvas(letterboxBmp)
 
-    private val yoloPixels = IntArray(320 * 320)
-    private val depthPixels = IntArray(252 * 252)
-    private val segPixels = IntArray(256 * 256)
+    private var depthBufSz = 252
+    private var depthBuf: FloatBuffer = allocFloatBuf(1 * 3 * 252 * 252)
+    private var depthPixels = IntArray(252 * 252)
 
-    // Bộ đệm tái sử dụng bitmap letterbox 320x320
-    private val letterboxBmp: Bitmap = Bitmap.createBitmap(320, 320, Bitmap.Config.ARGB_8888)
-    private val letterboxCanvas = Canvas(letterboxBmp)
+    private var segBufSz = 256
+    private var segBuf: FloatBuffer = allocFloatBuf(1 * 3 * 256 * 256)
+    private var segPixels = IntArray(256 * 256)
 
     // Cache kết quả Depth & SegFormer mới nhất cho lập lịch xen kẽ
     private var latestDepthMap: FloatArray? = null
-    private var depthW = 252
-    private var depthH = 252
+    private var depthW = 196
+    private var depthH = 196
     private var lastDepthLatencyMs = 0L
 
-    private var latestSegIds64: IntArray? = null
-    private val segSw = 64
-    private val segSh = 64
+    private var latestSegIdsGrid: IntArray? = null
+    private var segSw = 48
+    private var segSh = 48
     private var latestSegHazardsNorm: List<SegNormHazard> = emptyList()
+    private var latestObsRaw: List<RawBoxDet> = emptyList()
     private var cycleCount = 0
+
+    private fun allocFloatBuf(elems: Int): FloatBuffer =
+        ByteBuffer.allocateDirect(elems * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
 
     private data class SegNormHazard(
         val className: String,
@@ -91,8 +94,9 @@ class EdgeVisionPipeline(
     fun resetState() {
         cycleCount = 0
         latestDepthMap = null
-        latestSegIds64 = null
+        latestSegIdsGrid = null
         latestSegHazardsNorm = emptyList()
+        latestObsRaw = emptyList()
         decisionEngine.reset()
     }
 
@@ -109,15 +113,19 @@ class EdgeVisionPipeline(
         val imgH = frameBitmap.height
 
         cycleCount++
-        val runDepth = (latestDepthMap == null) || (lastDepthLatencyMs <= 110L) || (cycleCount % 2 == 1)
-        val runSeg = (latestSegIds64 == null) || (cycleCount % 3 == 0)
+        // Lập lịch xen kẽ thông minh cho di động:
+        // - YOLOE chạy ở MỌI khung hình
+        // - ObstacleYOLO11n chạy ở khung hình lẻ (hoặc chu kỳ 1), Depth chạy ở chu kỳ chẵn, SegFormer mỗi 4 chu kỳ
+        val runObs = (cycleCount == 1) || (cycleCount % 2 == 1)
+        val runDepth = (latestDepthMap == null) || (cycleCount % 2 == 0)
+        val runSeg = (latestSegIdsGrid == null) || (cycleCount % 4 == 0)
 
-        // 1. SegFormer (mỗi 3 chu kỳ, dùng trước cho Ground/Floor/Stairs validation)
+        // 1. SegFormer
         if (runSeg && bundle.segformer != null) {
             runSegFormer(frameBitmap, bundle, manifest, env)
         }
 
-        // 2. Depth Anything V2 (252x252 Metric Meters)
+        // 2. Depth Anything V2
         if (runDepth && bundle.depth != null) {
             val td0 = System.nanoTime()
             runDepthEstimator(frameBitmap, bundle, manifest, env)
@@ -127,8 +135,15 @@ class EdgeVisionPipeline(
         val dmap = latestDepthMap
         val threeLanes = DistanceEstimator.analyzeThreeLanesDepth(dmap, depthW, depthH)
 
-        // 3. YOLOE-26s-Seg (37 Open-Vocabulary guidance classes)
+        // 3. YOLOE-26s (37 Open-Vocabulary guidance classes)
         val yoloSz = manifest.yoloImgsz.coerceAtLeast(320)
+        if (yoloSz != yoloBufSz) {
+            yoloBufSz = yoloSz
+            yoloBuf = allocFloatBuf(1 * 3 * yoloSz * yoloSz)
+            yoloPixels = IntArray(yoloSz * yoloSz)
+            letterboxBmp = Bitmap.createBitmap(yoloSz, yoloSz, Bitmap.Config.ARGB_8888)
+            letterboxCanvas = Canvas(letterboxBmp)
+        }
         val (scale, padX, padY) = prepareYoloLetterboxTensor(frameBitmap, yoloSz)
         val yoloeRaw = runYoloSession(
             session = bundle.yoloe,
@@ -143,9 +158,9 @@ class EdgeVisionPipeline(
             padY = padY,
         )
 
-        // 4. ObstacleYOLO11n (8 lớp hố ga/ổ gà/hố sâu) - dùng chung yoloBuf đã chuẩn bị!
-        val obsRaw = if (bundle.obstacle != null) {
-            runYoloSession(
+        // 4. ObstacleYOLO11n (8 lớp đường phố) - tái sử dụng yoloBuf!
+        if (runObs && bundle.obstacle != null) {
+            latestObsRaw = runYoloSession(
                 session = bundle.obstacle,
                 env = env,
                 names = manifest.obstacleNames,
@@ -157,9 +172,8 @@ class EdgeVisionPipeline(
                 padX = padX,
                 padY = padY,
             )
-        } else {
-            emptyList()
         }
+        val obsRaw = latestObsRaw
 
         val candidates = ArrayList<EdgeCandidate>(yoloeRaw.size + obsRaw.size + 4)
 
@@ -445,7 +459,12 @@ class EdgeVisionPipeline(
         env: ai.onnxruntime.OrtEnvironment,
     ) {
         val sess = bundle.depth ?: return
-        val sz = manifest.depthImgsz.coerceAtLeast(252)
+        val sz = manifest.depthImgsz.coerceAtLeast(140)
+        if (sz != depthBufSz) {
+            depthBufSz = sz
+            depthBuf = allocFloatBuf(1 * 3 * sz * sz)
+            depthPixels = IntArray(sz * sz)
+        }
         val scaled = Bitmap.createScaledBitmap(src, sz, sz, true)
         scaled.getPixels(depthPixels, 0, sz, 0, 0, sz, sz)
         if (scaled != src) scaled.recycle()
@@ -502,7 +521,12 @@ class EdgeVisionPipeline(
         env: ai.onnxruntime.OrtEnvironment,
     ) {
         val sess = bundle.segformer ?: return
-        val sz = manifest.segImgsz.coerceAtLeast(256)
+        val sz = manifest.segImgsz.coerceAtLeast(128)
+        if (sz != segBufSz) {
+            segBufSz = sz
+            segBuf = allocFloatBuf(1 * 3 * sz * sz)
+            segPixels = IntArray(sz * sz)
+        }
         val scaled = Bitmap.createScaledBitmap(src, sz, sz, true)
         scaled.getPixels(segPixels, 0, sz, 0, 0, sz, sz)
         if (scaled != src) scaled.recycle()
@@ -563,7 +587,9 @@ class EdgeVisionPipeline(
                         if (x > maxX[bestC]) maxX[bestC] = x
                         if (y > maxY[bestC]) maxY[bestC] = y
                     }
-                    latestSegIds64 = argmax
+                    segSw = gw
+                    segSh = gh
+                    latestSegIdsGrid = argmax
 
                     val extracted = ArrayList<SegNormHazard>()
                     val total = cells.toFloat()
@@ -590,7 +616,7 @@ class EdgeVisionPipeline(
 
     private fun isValidPotholeRegion(box: EdgeBox, imgW: Int, imgH: Int, id2label: Map<String, String>): Boolean {
         if (box.y2 <= imgH * 0.34f) return false
-        val seg = latestSegIds64 ?: return true
+        val seg = latestSegIdsGrid ?: return true
         val rx1 = (box.x1 * segSw / max(1, imgW)).coerceIn(0, segSw - 1)
         val ry1 = (box.y1 * segSh / max(1, imgH)).coerceIn(0, segSh - 1)
         val rx2 = (box.x2 * segSw / max(1, imgW)).coerceIn(rx1 + 1, segSw)
