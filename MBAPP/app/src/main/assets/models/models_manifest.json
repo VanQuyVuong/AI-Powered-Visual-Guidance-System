@@ -2,8 +2,8 @@
   "schema_version": 1,
   "target_hardware": "MediaTek Dimensity 7300-Ultra (NPU 655 / NNAPI FP16 + XNNPACK)",
   "yolo_imgsz": 320,
-  "depth_imgsz": 252,
-  "seg_imgsz": 256,
+  "depth_imgsz": 196,
+  "seg_imgsz": 192,
   "imagenet_mean": [
     0.485,
     0.456,
@@ -217,28 +217,28 @@
   },
   "models": {
     "yoloe": {
-      "filename": "yoloe_26s_fp16.onnx",
-      "size_bytes": 20924926,
-      "size_mb": 19.96,
-      "sha256": "4d3100b622f3c39e"
+      "filename": "yoloe_26s.onnx",
+      "size_bytes": 41704952,
+      "size_mb": 39.77,
+      "sha256": "9e2c513b60a0b666"
     },
     "obstacle": {
-      "filename": "obstacle_yolo11n_fp16.onnx",
-      "size_bytes": 5295349,
-      "size_mb": 5.05,
-      "sha256": "0b70b68b192845e1"
+      "filename": "obstacle_yolo11n.onnx",
+      "size_bytes": 10483584,
+      "size_mb": 10.0,
+      "sha256": "29029eeb80925610"
     },
     "depth": {
       "filename": "depth_v2_fp16.onnx",
-      "size_bytes": 49827078,
-      "size_mb": 47.52,
-      "sha256": "f73025470be6ee17"
+      "size_bytes": 49848822,
+      "size_mb": 47.54,
+      "sha256": "5e613a502e4760c4"
     },
     "segformer": {
-      "filename": "segformer_b0_fp16.onnx",
-      "size_bytes": 7770324,
-      "size_mb": 7.41,
-      "sha256": "ffc5e78b77419a08"
+      "filename": "segformer_b0.onnx",
+      "size_bytes": 15176373,
+      "size_mb": 14.47,
+      "sha256": "611186c36df71291"
     }
   }
 }

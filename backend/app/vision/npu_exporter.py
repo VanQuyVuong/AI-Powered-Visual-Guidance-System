@@ -33,6 +33,11 @@ DEFAULT_FP16_OP_BLOCKLIST = [
     "Sqrt",
     "ReduceMean",
     "LayerNormalization",
+    "Erf",
+    "Div",
+    "Gelu",
+    "FastGelu",
+    "BiasGelu",
 ]
 
 
@@ -288,8 +293,8 @@ class MobileNpuExporter:
     def export_all_mobile_models(
         output_dir: Optional[Path] = None,
         yolo_imgsz: int = 320,
-        depth_imgsz: int = 252,
-        seg_imgsz: int = 256,
+        depth_imgsz: int = 196,
+        seg_imgsz: int = 192,
         verify: bool = True,
     ) -> Dict[str, Any]:
         """
@@ -318,34 +323,34 @@ class MobileNpuExporter:
         with tempfile.TemporaryDirectory(prefix="hkdn_onnx_export_") as tmp_str:
             tmp_dir = Path(tmp_str)
 
-            # 1. YOLOE-26s-Seg (37 Open-Vocabulary classes baked from .npz; giữ nguyên tên file gốc để khớp stem prompt)
+            # 1. YOLOE-26s-Seg (37 Open-Vocabulary classes; giữ đồ thị FP32 để Android NNAPI / Dimensity NPU nhận toàn bộ Conv với NNAPIFlags.USE_FP16)
             tmp_yoloe_pt = tmp_dir / yoloe_pt.name
             shutil.copy2(yoloe_pt, tmp_yoloe_pt)
             m_ye = YOLOE(str(tmp_yoloe_pt))
             m_ye.load_prompt_embeddings(str(DEFAULT_PROMPTS_NPZ))
             yoloe_names = [str(m_ye.names[i]) for i in sorted(m_ye.names.keys())]
             raw_ye_onnx = Path(m_ye.export(format="onnx", imgsz=yolo_imgsz, simplify=True, opset=17))
-            dst_ye = out_dir / "yoloe_26s_fp16.onnx"
-            _convert_onnx_fp16(raw_ye_onnx, dst_ye, op_block_list=[])
+            dst_ye = out_dir / "yoloe_26s.onnx"
+            shutil.copy2(raw_ye_onnx, dst_ye)
             exported_files["yoloe"] = dst_ye
             if verify:
                 dummy_y = np.zeros((1, 3, yolo_imgsz, yolo_imgsz), dtype=np.float32)
                 verified_shapes["yoloe"] = _verify_ort_session(dst_ye, {"images": dummy_y})
 
-            # 2. ObstacleYOLO11n (8 Ground/Road Hazards)
+            # 2. ObstacleYOLO11n (8 Ground/Road Hazards; FP32 cho NNAPI USE_FP16 + XNNPACK)
             tmp_obs_pt = tmp_dir / obs_pt.name
             shutil.copy2(obs_pt, tmp_obs_pt)
             m_obs = YOLO(str(tmp_obs_pt))
             obs_names = [str(m_obs.names[i]) for i in sorted(m_obs.names.keys())]
             raw_obs_onnx = Path(m_obs.export(format="onnx", imgsz=yolo_imgsz, simplify=True, opset=17))
-            dst_obs = out_dir / "obstacle_yolo11n_fp16.onnx"
-            _convert_onnx_fp16(raw_obs_onnx, dst_obs, op_block_list=[])
+            dst_obs = out_dir / "obstacle_yolo11n.onnx"
+            shutil.copy2(raw_obs_onnx, dst_obs)
             exported_files["obstacle"] = dst_obs
             if verify:
                 dummy_o = np.zeros((1, 3, yolo_imgsz, yolo_imgsz), dtype=np.float32)
                 verified_shapes["obstacle"] = _verify_ort_session(dst_obs, {"images": dummy_o})
 
-            # 3. Depth Anything V2 Metric Indoor Small (252x252, chia hết patch 14)
+            # 3. Depth Anything V2 Metric Indoor Small (252x252; chặn FP16 trên Erf/Div/Gelu để Android CPU/XNNPACK chạy ổn định 100%)
             depth_id = "depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf"
             try:
                 d_model = AutoModelForDepthEstimation.from_pretrained(depth_id, local_files_only=True).eval()
@@ -371,7 +376,7 @@ class MobileNpuExporter:
                 dummy_d = np.zeros((1, 3, depth_imgsz, depth_imgsz), dtype=np.float32)
                 verified_shapes["depth"] = _verify_ort_session(dst_depth, {"pixel_values": dummy_d})
 
-            # 4. SegFormer-B0 ADE20K (256x256)
+            # 4. SegFormer-B0 ADE20K (256x256; FP32 ~15MB giúp NNAPI & XNNPACK chạy mượt, không lỗi Gelu FP16)
             seg_id = "nvidia/segformer-b0-finetuned-ade-512-512"
             try:
                 s_model = AutoModelForSemanticSegmentation.from_pretrained(seg_id, local_files_only=True).eval()
@@ -391,8 +396,8 @@ class MobileNpuExporter:
                     do_constant_folding=True,
                     dynamo=False,
                 )
-            dst_seg = out_dir / "segformer_b0_fp16.onnx"
-            _convert_onnx_fp16(raw_s_onnx, dst_seg, op_block_list=DEFAULT_FP16_OP_BLOCKLIST)
+            dst_seg = out_dir / "segformer_b0.onnx"
+            shutil.copy2(raw_s_onnx, dst_seg)
             exported_files["segformer"] = dst_seg
             if verify:
                 dummy_s = np.zeros((1, 3, seg_imgsz, seg_imgsz), dtype=np.float32)
