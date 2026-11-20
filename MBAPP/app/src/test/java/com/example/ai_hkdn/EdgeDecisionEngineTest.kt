@@ -22,6 +22,17 @@ class EdgeDecisionEngineTest {
         val resolved = DistanceEstimator.resolveCalibratedDistance("chair", 1.1f, pinhole, farChairBox, 480, 640)
         assertTrue("Calibrated far chair must not false alarm close, got $resolved", resolved >= 2.0f)
 
+        // Vật sát mặt (bàn chiếm gần kín khung hình hoặc sách cận cảnh) nhưng Depth bị chói đèn/nền kéo xa > 2m
+        val closeTable = EdgeBox(0, 3, 479, 640)
+        val tablePinhole = DistanceEstimator.estimatePinholeDistanceM("table", closeTable, 480, 640)
+        val tableDist = DistanceEstimator.resolveCalibratedDistance("table", 7.6f, tablePinhole, closeTable, 480, 640)
+        assertTrue("Full-frame table must stay <= 1.4m, got $tableDist", tableDist <= 1.4f)
+
+        val closeBook = EdgeBox(134, 288, 374, 544)
+        val bookPinhole = DistanceEstimator.estimatePinholeDistanceM("book", closeBook, 480, 640)
+        val bookDist = DistanceEstimator.resolveCalibratedDistance("book", 2.6f, bookPinhole, closeBook, 480, 640)
+        assertTrue("Close book must not drift > 1.2m, got $bookDist", bookDist <= 1.2f)
+
         assertEquals("tấm gương", DistanceEstimator.getVietnameseName("mirror"))
         assertEquals("cửa kính", DistanceEstimator.getVietnameseName("glass_door"))
         assertEquals("stairs", DistanceEstimator.normalizeClass("flight of stairs"))

@@ -291,15 +291,33 @@ object DistanceEstimator {
         imgW: Int,
         imgH: Int,
     ): Float {
+        val w = max(1, imgW).toFloat()
+        val h = max(1, imgH).toFloat()
+        val bw = max(1f, (box.x2 - box.x1).toFloat())
+        val bh = max(1f, (box.y2 - box.y1).toFloat())
+        val boxHRatio = bh / h
+        val areaRatio = (bw * bh) / (w * h)
+
         if (metricDist == null || metricDist < 0.2f || metricDist > MAX_DISTANCE_M) {
             return round1(pinholeDist)
         }
-        val h = max(1, imgH).toFloat()
-        val boxHRatio = (box.y2 - box.y1).toFloat() / h
+
         val touchesBottom = box.y2 >= h * 0.94f
         val touchesTop = box.y1 <= h * 0.05f
         val cLower = className.lowercase().trim()
         val hasKnownHeight = (cLower == "person") || (cLower in OBJECT_REAL_HEIGHTS_M)
+
+        // 0. Vật thể trùm gần kín khung hình (bàn, tường, tủ sát camera) -> không bao giờ đoán xa > 1.4m
+        if (areaRatio >= 0.45f || boxHRatio >= 0.65f) {
+            val safeClose = min(metricDist, max(0.4f, min(1.4f, pinholeDist * 1.3f)))
+            return round1(safeClose)
+        }
+
+        // 0b. Vật sát mặt (<= 1.35m theo Pinhole hoặc hộp lớn) nhưng DepthV2 bị chói đèn/nền sau kéo xa > 2.0m
+        if ((pinholeDist <= 1.35f || areaRatio >= 0.28f || boxHRatio >= 0.48f) && metricDist > max(2.0f, pinholeDist * 1.75f)) {
+            val blendedClose = 0.75f * pinholeDist + 0.25f * min(metricDist, pinholeDist * 1.6f)
+            return round1(blendedClose.coerceIn(0.3f, 1.6f))
+        }
 
         if (pinholeDist >= 3.0f && boxHRatio < 0.22f && metricDist < pinholeDist * 0.62f) {
             return round1(pinholeDist)

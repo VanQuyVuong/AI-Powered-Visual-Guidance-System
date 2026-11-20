@@ -324,7 +324,7 @@ class EdgeVisionPipeline(
         if (needTelemetryVisuals) {
             frameB64 = encodeBitmapJpegB64(frameBitmap, quality = 58)
             if (dmap != null) {
-                depthB64 = encodeDepthHeatmapB64(dmap, depthW, depthH)
+                depthB64 = encodeDepthHeatmapB64(dmap, depthW, depthH, imgW, imgH)
             }
         }
 
@@ -660,9 +660,9 @@ class EdgeVisionPipeline(
         return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
     }
 
-    private fun encodeDepthHeatmapB64(dmap: FloatArray, dw: Int, dh: Int): String {
-        val outW = 126
-        val outH = 126
+    private fun encodeDepthHeatmapB64(dmap: FloatArray, dw: Int, dh: Int, imgW: Int, imgH: Int): String {
+        val outW = if (imgH > imgW) 144 else 192
+        val outH = if (imgH > imgW) 192 else 144
         val pixels = IntArray(outW * outH)
         for (y in 0 until outH) {
             val sy = (y * dh) / outH
