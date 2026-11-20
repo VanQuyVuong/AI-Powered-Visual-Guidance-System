@@ -248,6 +248,8 @@ fun SmartHatScreen() {
                     return@CameraPreviewView
                 }
                 edgeExecutor.execute {
+                    val bmpW = bitmap.width
+                    val bmpH = bitmap.height
                     try {
                         // Lưu nhanh 1 ảnh mẫu JPEG cho nút ĐỌC CHỮ nếu người dùng bấm
                         val baos = ByteArrayOutputStream()
@@ -260,14 +262,14 @@ fun SmartHatScreen() {
                             preferNpu = true,
                             needTelemetryVisuals = needVisuals,
                         )
-                        telemetryService.sendTelemetryIfReady(packet, bitmap.width, bitmap.height)
+                        telemetryService.sendTelemetryIfReady(packet, bmpW, bmpH)
 
                         mainHandler.post {
                             if (!isStreaming) return@post
                             latencyMs = packet.processingMs.toLong()
                             runtimeSummary = packet.runtimeSummary
-                            srcFrameWidth = bitmap.width
-                            srcFrameHeight = bitmap.height
+                            srcFrameWidth = bmpW
+                            srcFrameHeight = bmpH
                             detectedObjects = packet.analysis.detectedObjects
                             val displayMsg = packet.analysis.displayText
                             val speechMsg = packet.analysis.guidance.text
