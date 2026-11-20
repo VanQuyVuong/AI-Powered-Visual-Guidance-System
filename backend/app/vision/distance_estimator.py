@@ -128,18 +128,34 @@ def resolve_calibrated_distance(
 ) -> float:
     """
     Hòa giải thông minh giữa khoảng cách Metric Depth (Depth V2 / EdgeSAM) và Pinhole:
-    - Khắc phục lỗi stale depth map hoặc Depth Indoor đoán non cho vật thể ở xa > 2.35m (VD: ghế cách 4-5 viên gạch ~2.6m-3m).
-    - Giữ nguyên ưu tiên an toàn tuyệt đối nếu vật thực sự ở sát gần (<= 1.35m hoặc chạm đáy ảnh).
+    - Chiều 1 (Vật ở xa bị Depth kéo tụt lại gần): ưu tiên Pinhole khi vật nhỏ ở >= 2.35m.
+    - Chiều 2 (Vật sát mặt bị Depth kéo vọt ra xa do chói đèn / nhìn xuyên kính / nền sau lọt vào box):
+      ưu tiên Pinhole & tỷ lệ khung hình khi vật chiếm diện tích lớn hoặc ở gần <= 1.35m.
     """
+    w = float(max(1, img_w))
+    h = float(max(1, img_h))
+    bw = max(1.0, float(box["x2"]) - float(box["x1"]))
+    bh = max(1.0, float(box["y2"]) - float(box["y1"]))
+    box_h_ratio = bh / h
+    area_ratio = (bw * bh) / (w * h)
+
     if metric_dist is None or not (0.2 <= metric_dist <= MAX_DISTANCE_M):
         return round(pinhole_dist, 1)
 
-    h = float(max(1, img_h))
-    box_h_ratio = (float(box["y2"]) - float(box["y1"])) / h
     touches_bottom = float(box["y2"]) >= h * 0.94
     touches_top = float(box["y1"]) <= h * 0.05
     c_lower = (cname or "").lower().strip()
     has_known_height = (c_lower == "person") or (c_lower in OBJECT_REAL_HEIGHTS_M)
+
+    # 0. Vật thể trùm gần kín khung hình (bàn, tường, tủ sát mặt) -> không bao giờ được đoán xa > 1.4m
+    if area_ratio >= 0.45 or box_h_ratio >= 0.65:
+        safe_close = min(metric_dist, max(0.4, min(1.4, pinhole_dist * 1.3)))
+        return round(safe_close, 1)
+
+    # 0b. Vật ở rất gần (<= 1.35m theo quang học / hộp lớn) nhưng DepthV2 bị chói đèn hoặc dính nền sau (> 2.0m)
+    if (pinhole_dist <= 1.35 or area_ratio >= 0.28 or box_h_ratio >= 0.48) and metric_dist > max(2.0, pinhole_dist * 1.75):
+        blended_close = 0.75 * pinhole_dist + 0.25 * min(metric_dist, pinhole_dist * 1.6)
+        return round(min(1.6, max(0.3, blended_close)), 1)
 
     # 1. Vật nhỏ/xa rõ rệt (>= 3.0m theo quang học) nhưng depth map chưa kịp cập nhật -> ưu tiên Pinhole
     if pinhole_dist >= 3.0 and box_h_ratio < 0.22 and metric_dist < pinhole_dist * 0.62:

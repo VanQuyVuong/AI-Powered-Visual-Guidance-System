@@ -88,3 +88,22 @@ def test_websocket_edge_telemetry_mirrors_to_viewers_without_running_server_ai()
         assert relayed["processing_ms"] == 46.5
         assert relayed["objects"][0]["class_name"] == "stairs"
         assert "cầu thang" in relayed["guidance"]["text"]
+
+
+def test_close_range_table_and_glare_book_override_distant_depth():
+    """Đảm bảo vật chiếm gần kín khung hình hoặc ở rất gần không bị Depth chói đèn kéo xa thành an toàn."""
+    from app.vision.distance_estimator import estimate_distance_m, resolve_calibrated_distance
+
+    # Ca 1: Bàn chiếm gần 100% khung hình (0, 3, 479, 640) nhưng DepthV2 dính vùng cửa sổ bên phải đoán 7.6m
+    table_box = {"x1": 0, "y1": 3, "x2": 479, "y2": 640}
+    pinhole_table = estimate_distance_m("table", table_box, 480, 640)
+    resolved_table = resolve_calibrated_distance("table", 7.6, pinhole_table, table_box, 480, 640)
+    assert resolved_table <= 1.4
+
+    # Ca 2: Cuốn sách trên bàn sát mặt (pinhole ~0.5m) nhưng nửa trên dính đèn chói/nền xa làm Depth đoán 2.6m
+    book_box = {"x1": 134, "y1": 288, "x2": 374, "y2": 544}
+    pinhole_book = estimate_distance_m("book", book_box, 480, 640)
+    assert pinhole_book <= 1.0
+    resolved_book = resolve_calibrated_distance("book", 2.6, pinhole_book, book_box, 480, 640)
+    assert resolved_book <= 1.2
+
