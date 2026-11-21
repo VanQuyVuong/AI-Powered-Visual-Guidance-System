@@ -46,3 +46,12 @@ research*/
 test_media/output/
 test_media/input/*
 !test_media/input/README.md
+ImagesTest/*
+!ImagesTest/README.md
+!ImagesTest/*/
+!ImagesTest/*/.gitkeep
+ImagesTest/*/*
+!ImagesTest/*/.gitkeep
+ImagesTest/_results/
+backend/training/custom_dataset/
+runs/

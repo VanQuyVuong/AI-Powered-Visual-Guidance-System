@@ -23,7 +23,7 @@ from app.vision.decision_engine import (
 )
 from app.vision.tactile_paving_detector import detect_tactile_paving
 from app.vision.depth_service import depth_service
-from app.vision.distance_estimator import estimate_distance_m
+from app.vision.distance_estimator import estimate_distance_m, resolve_calibrated_distance
 from app.vision.sam_service import sam_service
 from app.vision.fusion_engine import fusion_engine
 
@@ -36,8 +36,66 @@ OBSTACLE_CLASSES = {
     "dog", "cat", "car", "motorcycle", "bicycle", "bus", "truck",
     "door", "stairs", "stair", "step", "curb", "doorstep", "threshold",
     "stop sign", "traffic light", "fire hydrant",
-    "wall", "column", "pillar", "cabinet", "obstacle", "multi_obstacle", "pothole", "dropoff"
+    "wall", "column", "pillar", "cabinet", "obstacle", "multi_obstacle",
+    "pothole", "dropoff", "mirror", "glass_door", "open_manhole",
 }
+
+YOLO_CLASS_ALIASES = {
+    "staircase": "stairs",
+    "flight of stairs": "stairs",
+    "steps": "stairs",
+    "stair": "stairs",
+    "doorstep": "step",
+    "curb": "step",
+    "bump": "step",
+    "water puddle": "pothole",
+    "puddle": "pothole",
+    "open manhole": "open_manhole",
+    "manhole": "open_manhole",
+    "glass door": "glass_door",
+    "pillar": "column",
+    "pole": "column",
+    "bollard": "column",
+    "barrier": "obstacle",
+    "trash can": "obstacle",
+    "waste_container": "obstacle",
+}
+
+
+def _normalize_yolo_class(raw_name: str) -> str:
+    """Chuẩn hóa nhãn từ COCO / Open-Vocabulary YOLOE / ObstacleYOLO về từ vựng chuẩn của hệ thống."""
+    key = str(raw_name or "").lower().strip()
+    return YOLO_CLASS_ALIASES.get(key, key)
+
+
+def _filter_reflections_inside_mirrors(objects: list) -> list:
+    """Loại bỏ các vật thể ảo phản chiếu nằm lọt bên trong khung gương soi."""
+    mirror_boxes = [
+        o["bounding_box"] for o in objects if str(o.get("class_name", "")).lower() == "mirror"
+    ]
+    if not mirror_boxes:
+        return objects
+    kept = []
+    for obj in objects:
+        cname = str(obj.get("class_name", "")).lower()
+        if cname == "mirror":
+            kept.append(obj)
+            continue
+        bb = obj.get("bounding_box") or {}
+        bx1, by1, bx2, by2 = bb.get("x1", 0), bb.get("y1", 0), bb.get("x2", 0), bb.get("y2", 0)
+        area = float(max(1, (bx2 - bx1) * (by2 - by1)))
+        inside_mirror = False
+        for mb in mirror_boxes:
+            ix1 = max(bx1, mb.get("x1", 0))
+            iy1 = max(by1, mb.get("y1", 0))
+            ix2 = min(bx2, mb.get("x2", 0))
+            iy2 = min(by2, mb.get("y2", 0))
+            if ix2 > ix1 and iy2 > iy1 and float((ix2 - ix1) * (iy2 - iy1)) / area >= 0.55:
+                inside_mirror = True
+                break
+        if not inside_mirror:
+            kept.append(obj)
+    return kept
 
 # Các lớp đồ vật lớn
 LARGE_FALSE_POSITIVE_CLASSES = {"bed", "couch"}
@@ -83,10 +141,60 @@ def _sync_navigation_with_decision(
     return nav_data
 
 
-def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
+def _encode_preview_visuals(
+    image_bytes: bytes,
+    frame_bgr: Optional[np.ndarray],
+    dmap: Optional[np.ndarray],
+    is_stream: bool,
+) -> tuple[Optional[str], Optional[str]]:
+    """
+    Mã hóa ảnh preview `frame_b64` và bản đồ độ sâu `depth_b64` cho Web Monitor (/view-phone):
+    - Tái sử dụng trực tiếp JPEG bytes đầu vào khi stream (0ms cv2.imencode).
+    - Thu gọn depth map về ngang <= 240px trước khi áp colormap Turbo để giảm ~70% thời gian mã hóa & băng thông.
+    """
+    import base64
+
+    frame_b64 = None
+    depth_b64 = None
+
+    if frame_bgr is not None:
+        try:
+            if is_stream and len(image_bytes) <= 120_000 and image_bytes[:2] == b"\xff\xd8":
+                frame_b64 = base64.b64encode(image_bytes).decode("utf-8")
+            else:
+                _, buffer = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                frame_b64 = base64.b64encode(buffer).decode("utf-8")
+        except Exception:
+            pass
+
+    cur_dmap = dmap if dmap is not None else depth_service.get_or_create_display_depth_map(frame_bgr)
+    if cur_dmap is not None and cur_dmap.size > 0:
+        try:
+            dh, dw = cur_dmap.shape[:2]
+            if dw > 240:
+                s_disp = 240.0 / float(dw)
+                disp_dmap = cv2.resize(
+                    cur_dmap,
+                    (240, max(32, int(round(dh * s_disp)))),
+                    interpolation=cv2.INTER_AREA,
+                )
+            else:
+                disp_dmap = cur_dmap
+            d_norm = cv2.normalize(disp_dmap, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+            d_colored = cv2.applyColorMap(d_norm, cv2.COLORMAP_TURBO)
+            _, d_buf = cv2.imencode(".jpg", d_colored, [cv2.IMWRITE_JPEG_QUALITY, 65])
+            depth_b64 = base64.b64encode(d_buf).decode("utf-8")
+        except Exception:
+            pass
+
+    return frame_b64, depth_b64
+
+
+def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False, include_visuals: bool = True) -> dict:
     """
     Toàn bộ phần xử lý nặng (YOLO + Depth Anything V2 + SegFormer + Geometric Hazard + Tactile Paving).
     Hàm đồng bộ chạy trong threadpool (asyncio.to_thread).
+    `include_visuals=False` bỏ qua mã hóa ảnh preview khi không có Web Monitor mở để giảm độ trễ & băng thông.
     """
     t0 = time.perf_counter()
     if not image_bytes:
@@ -110,12 +218,11 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
     dmap = depth_service.get_latest_depth_map()
 
     all_objects = []
-    roi_detections = []
     has_person_in_roi = False
     has_obstacle_in_roi = False
 
     for det in raw_detections:
-        cname = det["class_name"].lower()
+        cname = _normalize_yolo_class(det["class_name"])
         conf = det["confidence"]
         box = det["bounding_box"]
 
@@ -135,59 +242,63 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
         if conf < min_conf:
             continue
 
+        bw = max(1, box["x2"] - box["x1"])
+        bh = max(1, box["y2"] - box["y1"])
+        area_ratio = float(bw * bh) / float(max(1, img_width * img_height))
+        bh_ratio = float(bh) / float(max(1, img_height))
+
+        # Bỏ gương trang trí nhỏ treo lệch mép trên tường không nằm trên đường đi
+        if cname in ("mirror", "glass_door") and area_ratio < 0.08 and bh_ratio < 0.35:
+            continue
+
+        # Với ổ gà / vũng nước từ Open-Vocabulary: kiểm tra ngữ cảnh mặt đường để không bắt nhầm bóng phản chiếu nền gạch
+        if cname == "pothole":
+            with depth_service._lock:
+                seg_snap = depth_service._latest_seg_map
+            if not depth_service._is_valid_pothole_box(box["x1"], box["y1"], box["x2"], box["y2"], img_width, img_height, seg_snap):
+                continue
+
         in_corridor = is_in_roi(box["x1"], box["y1"], box["x2"], box["y2"], img_width, img_height)
         pos = determine_position(box["x1"], box["x2"], img_width)
         is_person = (cname == "person")
 
-        # 2. Ưu tiên lấy khoảng cách mét tinh chỉnh theo Pixel Mask của EdgeSAM + Depth Anything V2,
-        # ĐỒNG THỜI đối chiếu chéo với khoảng cách hình học Pinhole để chống lỗi lệch frame (stale depth map)
-        # khi lia camera nhanh từ vật gần sang chiếc ghế ở xa (ví dụ ghế cách 5.5m nhưng depth map cũ còn lưu 1.3m).
-        pinhole_dist = estimate_distance_m(cname, box, img_width, img_height)
-        sam_mask_dist = sam_service.get_mask_refined_depth(box, dmap)
-        metric_dist = sam_mask_dist or depth_service.get_box_median_depth(box["x1"], box["y1"], box["x2"], box["y2"], dmap)
-        box_h_ratio = (box["y2"] - box["y1"]) / float(max(1, img_height))
-
-        if metric_dist is not None and 0.2 <= metric_dist <= 15.0:
-            # Nếu hộp bao rất nhỏ (vật ở xa >= 3.0m theo kích thước quang học) nhưng depth map lại báo quá gần (< 62% pinhole_dist)
-            # do bản đồ độ sâu bất đồng bộ chưa kịp cập nhật khi xoay camera -> ưu tiên khoảng cách quang học thực tế!
-            if pinhole_dist >= 3.0 and box_h_ratio < 0.22 and metric_dist < pinhole_dist * 0.62:
-                dist_m = round(pinhole_dist, 1)
-            else:
-                dist_m = round(metric_dist, 1)
+        # 2. Tính khoảng cách theo loại bề mặt:
+        # - Gương / cửa kính: đo dải viền khung bao (tránh bị phản chiếu phòng xa bên trong mặt kính đánh lừa)
+        # - Ổ gà / vũng nước: đo mép dưới gần bàn chân
+        # - Vật cản thông thường: ưu tiên EdgeSAM mask + Depth V2 hòa giải Pinhole qua `resolve_calibrated_distance`
+        sam_mask_dist = None
+        if cname in ("mirror", "glass_door"):
+            dist_m = depth_service.estimate_surface_ring_depth(
+                box["x1"], box["y1"], box["x2"], box["y2"], dmap, img_width, img_height
+            )
+            if pos == "center" and (cname == "glass_door" or bh_ratio >= 0.45):
+                in_corridor = True
+        elif cname == "pothole":
+            dist_m = depth_service._estimate_pothole_distance(
+                box["x1"], box["y1"], box["x2"], box["y2"], dmap, img_width, img_height
+            )
+            in_corridor = True
         else:
-            dist_m = round(pinhole_dist, 1)
+            pinhole_dist = estimate_distance_m(cname, box, img_width, img_height)
+            sam_mask_dist = sam_service.get_mask_refined_depth(box, dmap)
+            metric_dist = sam_mask_dist or depth_service.get_box_median_depth(box["x1"], box["y1"], box["x2"], box["y2"], dmap)
+            dist_m = resolve_calibrated_distance(cname, metric_dist, pinhole_dist, box, img_width, img_height)
 
         overlaps_center = (box["x1"] < 0.58 * img_width and box["x2"] > 0.42 * img_width)
-        # 3. Tiêu chí nguy hiểm chuẩn trong nhà: Chỉ cảnh báo chắn lối đi thẳng khi vật cản thực sự nằm ở làn giữa (hoặc tràn sâu vào trục giữa) và <= 2.25m.
-        # Khi người dùng đã rẽ phải/trái làm vật cản dạt sang bên (pos in left/right và không còn đè trục giữa), giải phóng in_path ngay!
         in_path = (pos == "center") or overlaps_center or (in_corridor and pos == "center")
-        is_danger = (in_path and dist_m <= 2.25) or (dist_m <= 1.65)
+        if cname in ("stairs", "step", "pothole", "dropoff", "open_manhole"):
+            is_danger = dist_m <= 2.40
+        elif cname in ("mirror", "glass_door"):
+            is_danger = dist_m <= 1.85 and (pos == "center" or overlaps_center)
+        else:
+            is_danger = (in_path and dist_m <= 2.25) or (dist_m <= 1.65)
 
-        # Chuẩn hóa confidence >= 0.40 cho các đồ vật nhỏ đã qua lọc
         effective_conf = max(conf, 0.42)
 
-        det_item = Detection(
-            class_name=det["class_name"],
-            class_name_vn=get_vietnamese_name(det["class_name"]),
-            confidence=effective_conf,
-            position=pos,
-            distance_m=dist_m,
-            in_roi=in_corridor or in_path,
-            is_danger=is_danger,
-            bounding_box=BoundingBox(**box)
-        )
-
-        if is_danger:
-            if is_person:
-                has_person_in_roi = True
-            else:
-                has_obstacle_in_roi = True
-            roi_detections.append(det_item)
-
         all_objects.append({
-            "class_name": det["class_name"],
-            "class_name_vn": get_vietnamese_name(det["class_name"]),
-            "confidence": conf,
+            "class_name": cname,
+            "class_name_vn": get_vietnamese_name(cname),
+            "confidence": effective_conf,
             "position": pos,
             "bounding_box": box,
             "in_roi": in_corridor or in_path,
@@ -195,6 +306,8 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
             "is_danger": is_danger,
             "sam_mask_refined": sam_mask_dist is not None,
         })
+
+    all_objects = _filter_reflections_inside_mirrors(all_objects)
 
     # 4. CHẠY PHÁT HIỆN CỘT NHÀ, BỨC TƯỜNG, BẬC THỀM, CẦU THANG & VẬT CẢN LẠ (KẾT HỢP DEPTH + GEOMETRIC + EDGESAM)
     # Chỉ truyền các hộp bao của vật thể GẦN (<= 2.25m) vào known_boxes để bàn ghế ở xa (4m - 5.5m) trong lớp học
@@ -312,25 +425,12 @@ def analyze_frame_sync(image_bytes: bytes, is_stream: bool = False) -> dict:
     _sync_navigation_with_decision(nav_data, decision_telem, guidance_data.get("display_text", ""))
 
     # 9. Mã hóa frame_b64 và depth_b64 phục vụ xem trực tiếp trên web monitor (/view-phone)
-    import base64
-    frame_b64 = None
-    if frame_bgr is not None:
-        try:
-            _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
-            frame_b64 = base64.b64encode(buffer).decode('utf-8')
-        except Exception:
-            pass
-
-    depth_b64 = None
-    cur_dmap = dmap if dmap is not None else depth_service.get_or_create_display_depth_map(frame_bgr)
-    if cur_dmap is not None:
-        try:
-            d_norm = cv2.normalize(cur_dmap, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-            d_colored = cv2.applyColorMap(d_norm, cv2.COLORMAP_TURBO)
-            _, d_buf = cv2.imencode('.jpg', d_colored, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            depth_b64 = base64.b64encode(d_buf).decode('utf-8')
-        except Exception:
-            pass
+    # Bỏ qua hoàn toàn nếu không có Web Viewer kết nối (include_visuals=False)
+    frame_b64, depth_b64 = (
+        _encode_preview_visuals(image_bytes, frame_bgr, dmap, is_stream)
+        if include_visuals
+        else (None, None)
+    )
 
     processing_ms = round((time.perf_counter() - t0) * 1000.0, 1)
 

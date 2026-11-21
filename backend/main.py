@@ -6,6 +6,7 @@ AI Visual Guidance System - Backend API Server (FastAPI)
 import os
 import io
 import sys
+import json
 import subprocess
 import base64
 import asyncio
@@ -18,11 +19,14 @@ if os.path.exists(_venv_python):
     if os.path.normcase(os.path.abspath(sys.executable)) != os.path.normcase(os.path.abspath(_venv_python)):
         sys.exit(subprocess.call([_venv_python, "-u"] + sys.argv))
 
-# Thiết lập UTF-8 cho console Windows
-if hasattr(sys.stdout, 'buffer'):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True, write_through=True)
-if hasattr(sys.stderr, 'buffer'):
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True, write_through=True)
+# Thiết lập UTF-8 cho console Windows (dùng reconfigure an toàn, không đóng nhầm buffer của pytest)
+if "PYTEST_CURRENT_TEST" not in os.environ:
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace", write_through=True)
+            except Exception:
+                pass
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,7 +35,13 @@ from pydantic import BaseModel
 import uvicorn
 
 # Schemas
-from app.schemas.vision import VisionAnalyzeResponse, Detection, Guidance, BoundingBox
+from app.schemas.vision import (
+    VisionAnalyzeResponse,
+    Detection,
+    Guidance,
+    BoundingBox,
+    build_light_client_payload,
+)
 
 # Services & Vision Modules
 from app.vision.pipeline import analyze_frame_sync
@@ -170,21 +180,52 @@ class ConnectionManager:
     """Quản lý các kết nối WebSocket cho cả Phone Stream và Web Remote Viewer."""
     def __init__(self):
         self.active_connections: list = []
-        self.latest_result: dict = None
+        self.viewer_connections: set = set()
+        self.latest_result: Optional[dict] = None
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
         print(f"📱 Client kết nối. Tổng số kết nối: {len(self.active_connections)}")
 
+    def mark_viewer(self, websocket: WebSocket):
+        self.viewer_connections.add(websocket)
+
+    def has_viewers(self) -> bool:
+        return len(self.viewer_connections) > 0
+
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+        self.viewer_connections.discard(websocket)
         print(f"📱 Client ngắt kết nối. Tổng số kết nối: {len(self.active_connections)}")
 
-    async def broadcast(self, message: dict):
+    async def broadcast(self, message: dict, sender_ws: Optional[WebSocket] = None):
+        """
+        Phát kết quả theo từng vai trò để chống nghẽn Wi-Fi & lag trình duyệt:
+        - Phone/Sender nhận payload nhẹ (~1-2KB), không gửi ngược ảnh frame_b64/depth_b64.
+        - Web Monitor (VIEW_ONLY) nhận full payload (kèm depth & Fusion HUD) đúng 1 lần mỗi frame mới.
+        """
         self.latest_result = message
+        light_msg = None
         for conn in list(self.active_connections):
+            try:
+                if conn in self.viewer_connections:
+                    await conn.send_json(message)
+                else:
+                    if light_msg is None:
+                        light_msg = build_light_client_payload(message)
+                    await conn.send_json(light_msg)
+            except Exception:
+                pass
+
+    async def broadcast_to_viewers(self, message: dict):
+        """
+        Chuyển tiếp telemetry & khung hình do điện thoại tự xử lý trên NPU/Edge sang Web Monitor
+        trên Laptop (0% tải suy luận trên Laptop và không gửi dội ngược về điện thoại).
+        """
+        self.latest_result = message
+        for conn in list(self.viewer_connections):
             try:
                 await conn.send_json(message)
             except Exception:
@@ -196,20 +237,14 @@ manager = ConnectionManager()
 @app.websocket("/api/v1/vision/stream")
 async def websocket_endpoint(websocket: WebSocket):
     """
-    WebSocket Stream phân tích video thời gian thực từ Mobile App / Web.
-    - Phone Client: Gửi frame base64 -> Nhận kết quả AI -> Broadcast đến Web Monitor.
-    - Web Viewer (VIEW_ONLY): Kết nối để theo dõi màn hình điện thoại từ xa.
+    WebSocket Stream phân tích video thời gian thực từ Mobile App / Web:
+    - Phone Server-Assist: Gửi frame base64 -> Laptop chạy AI & trả JSON gọn -> Broadcast Web Monitor.
+    - Phone Edge/NPU Telemetry: Gửi JSON `type=EDGE_TELEMETRY` đã suy luận trên điện thoại -> Laptop chỉ mirror lên Web Monitor.
+    - Web Viewer (VIEW_ONLY): Nhận push trực tiếp khi có frame mới.
     """
     await manager.connect(websocket)
 
-    # Nếu có kết quả gần nhất, gửi ngay cho client mới kết nối
-    if manager.latest_result:
-        try:
-            await websocket.send_json(manager.latest_result)
-        except Exception:
-            pass
-
-    state = {"latest": None, "closed": False, "is_viewer": False}
+    state = {"latest": None, "latest_telemetry": None, "closed": False, "is_viewer": False}
     new_frame = asyncio.Event()
 
     async def reader():
@@ -218,7 +253,26 @@ async def websocket_endpoint(websocket: WebSocket):
                 msg = await websocket.receive_text()
                 if msg == "VIEW_ONLY":
                     state["is_viewer"] = True
+                    manager.mark_viewer(websocket)
+                    if manager.latest_result:
+                        try:
+                            await websocket.send_json(manager.latest_result)
+                        except Exception:
+                            pass
                     continue
+                stripped = msg.lstrip()
+                if stripped.startswith("{"):
+                    try:
+                        parsed = json.loads(stripped)
+                        if isinstance(parsed, dict) and (
+                            parsed.get("type") == "EDGE_TELEMETRY"
+                            or str(parsed.get("mode", "")).startswith("EDGE")
+                        ):
+                            state["latest_telemetry"] = parsed
+                            new_frame.set()
+                            continue
+                    except Exception:
+                        pass
                 state["latest"] = msg
                 new_frame.set()
         except Exception:
@@ -231,13 +285,8 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             if state["is_viewer"]:
-                # Client chỉ xem: gửi kết quả mới nhất định kỳ
-                if manager.latest_result:
-                    try:
-                        await websocket.send_json(manager.latest_result)
-                    except Exception:
-                        break
-                await asyncio.sleep(0.08)
+                # Viewer chỉ nhận push sự kiện thực từ manager.broadcast khi có frame mới -> không lặp dữ liệu
+                await asyncio.sleep(0.25)
                 if state["closed"]:
                     break
                 continue
@@ -246,6 +295,14 @@ async def websocket_endpoint(websocket: WebSocket):
             new_frame.clear()
             if state["closed"]:
                 break
+
+            tele = state["latest_telemetry"]
+            if tele is not None:
+                state["latest_telemetry"] = None
+                tele.setdefault("success", True)
+                tele.setdefault("mode", "EDGE_ON_DEVICE_NPU")
+                await manager.broadcast_to_viewers(tele)
+
             data = state["latest"]
             state["latest"] = None
             if not data:
@@ -254,9 +311,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 if "," in data:
                     data = data.split(",", 1)[1]
                 image_bytes = base64.b64decode(data)
-                result = await asyncio.to_thread(analyze_frame_sync, image_bytes, True)
-                # Gửi cho chính client và broadcast cho các Web Viewer
-                await manager.broadcast(result)
+                result = await asyncio.to_thread(
+                    analyze_frame_sync, image_bytes, True, manager.has_viewers()
+                )
+                # Gửi bản gọn về client gửi và full HUD cho các Web Viewer
+                await manager.broadcast(result, sender_ws=websocket)
             except WebSocketDisconnect:
                 break
             except Exception as frame_error:

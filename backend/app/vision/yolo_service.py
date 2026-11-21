@@ -3,13 +3,14 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-# Tải model ở ngoài hàm để load 1 lần khi bật server
-# Thứ tự ưu tiên: Custom model -> YOLO11n (Nano siêu nhanh ~25ms cho real-time 4 model song song) -> YOLOv8n -> YOLO11s
+# Thứ tự ưu tiên: Model chỉ định -> Model fine-tune riêng (`guidance_model`) -> Open-Vocabulary YOLOE-26s -> YOLO11n COCO
 model_file = None
 candidates = [
     os.getenv("YOLO_MODEL"),
     "guidance_model.onnx",
     "guidance_model.pt",
+    "yoloe-26s-seg.pt",
+    "yoloe-26n-seg.pt",
     "yolo11n.pt",
     "yolov8n.pt",
     "yolo11s.pt",
@@ -17,13 +18,15 @@ candidates = [
     "yolo26n.pt",
 ]
 
+here_vision = os.path.dirname(__file__)
 for name in candidates:
     if not name:
         continue
     search_paths = [
         name,
-        os.path.join(os.path.dirname(__file__), "..", "..", name),
-        os.path.join(os.path.dirname(__file__), "..", "..", "..", name)
+        os.path.join(here_vision, name),
+        os.path.join(here_vision, "..", "..", name),
+        os.path.join(here_vision, "..", "..", "..", name),
     ]
     for p in search_paths:
         if os.path.exists(p):
@@ -36,13 +39,30 @@ if not model_file:
     model_file = "yolov8n.pt"
 
 print(f"Đang khởi tạo model YOLO: {model_file}...")
-model = YOLO(model_file)
+npz_prompt_path = os.path.join(here_vision, "yoloe_guidance_prompts.npz")
+if "yoloe" in os.path.basename(model_file).lower() and os.path.exists(npz_prompt_path):
+    try:
+        from ultralytics import YOLOE
+        model = YOLOE(model_file)
+        model.load_prompt_embeddings(npz_prompt_path)
+        print(f"✅ Đã nạp Open-Vocabulary YOLOE ({len(model.names)} lớp chỉ đường từ cache .npz)")
+    except Exception as _ye:
+        print(f"⚠️ Lỗi nạp YOLOE, lùi về YOLO thường: {_ye}")
+        model = YOLO("yolo11n.pt" if os.path.exists("yolo11n.pt") else model_file)
+else:
+    model = YOLO(model_file)
+
+from app.vision.model_scheduler import configure_cpu_threads
 
 # Tự động dùng GPU (CUDA) nếu có -> nhanh gấp nhiều lần CPU
+# Khi chạy CPU đa mô hình song song, configure_cpu_threads() giữ 1/2 số logical cores (tối đa 6)
 try:
     import torch
     DEVICE = 0 if torch.cuda.is_available() else "cpu"
+    if DEVICE == "cpu":
+        configure_cpu_threads()
 except Exception:
+    torch = None
     DEVICE = "cpu"
 USE_HALF = (DEVICE != "cpu")
 DEFAULT_IMGSZ = 480 if DEVICE != "cpu" else 416
@@ -81,8 +101,12 @@ def run_inference(image_or_bytes, imgsz: int = DEFAULT_IMGSZ):
     img = _ensure_bgr_frame(image_or_bytes)
     height, width, _ = img.shape
 
-    # Chạy YOLO inference ở độ phân giải tối ưu DEFAULT_IMGSZ (416 trên CPU)
-    results = model(img, verbose=False, device=DEVICE, imgsz=imgsz, **extra_kw)
+    # Chạy YOLO inference ở độ phân giải tối ưu DEFAULT_IMGSZ (416 trên CPU) dưới torch.inference_mode()
+    if torch is not None:
+        with torch.inference_mode():
+            results = model(img, verbose=False, device=DEVICE, imgsz=imgsz, **extra_kw)
+    else:
+        results = model(img, verbose=False, device=DEVICE, imgsz=imgsz, **extra_kw)
 
     detections = []
     for result in results:
@@ -116,9 +140,14 @@ def run_tracking(image_or_bytes, imgsz: int = DEFAULT_IMGSZ):
     img = _ensure_bgr_frame(image_or_bytes)
     height, width, _ = img.shape
 
-    # Chạy YOLO Tracking với ngưỡng tin cậy conf=0.25 để bắt nhạy ghế, chai nước, cặp sách, bàn
-    results = model.track(img, persist=True, tracker="bytetrack.yaml", verbose=False, conf=0.25,
-                          device=DEVICE, imgsz=imgsz, **extra_kw)
+    # Chạy YOLO Tracking với ngưỡng tin cậy conf=0.25 dưới torch.inference_mode() để giảm overhead CPU
+    if torch is not None:
+        with torch.inference_mode():
+            results = model.track(img, persist=True, tracker="bytetrack.yaml", verbose=False, conf=0.25,
+                                  device=DEVICE, imgsz=imgsz, **extra_kw)
+    else:
+        results = model.track(img, persist=True, tracker="bytetrack.yaml", verbose=False, conf=0.25,
+                              device=DEVICE, imgsz=imgsz, **extra_kw)
 
     detections = []
     for result in results:
