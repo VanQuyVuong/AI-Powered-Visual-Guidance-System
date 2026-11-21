@@ -74,6 +74,7 @@ def _segment_sync(
     x: Optional[float] = None,
     y: Optional[float] = None,
     existing_dets: Optional[list] = None,
+    use_cached_if_fresh: bool = False,
 ) -> dict:
     nparr = np.frombuffer(image_bytes, np.uint8)
     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR) if nparr.size > 0 else None
@@ -81,6 +82,30 @@ def _segment_sync(
         raise ValueError("Không thể đọc được ảnh (INVALID_IMAGE)")
     h, w = frame.shape[:2]
     t0 = time.time()
+
+    # Tái sử dụng ngay mặt nạ EdgeSAM mới nhất từ luồng nền cho Web Auto-SAM (tránh chạy lặp EdgeSAM lần 2 trên CPU)
+    if use_cached_if_fresh and x is None and y is None:
+        cached = sam_service.get_cached_masks(max_age_s=2.5)
+        if cached:
+            objects = []
+            for s in cached:
+                objects.append({
+                    "class_name": "obstacle",
+                    "class_name_vn": "mặt nạ EdgeSAM",
+                    "confidence": None,
+                    **s,
+                })
+            overlay_b64 = _render_mask_overlay(frame, objects)
+            return {
+                "success": True,
+                "model": sam_service.model_name,
+                "cached": True,
+                "img_size": {"width": w, "height": h},
+                "count": len(objects),
+                "elapsed_ms": int((time.time() - t0) * 1000),
+                "overlay_b64": overlay_b64,
+                "objects": objects,
+            }
 
     # Chế độ 1: phân đoạn theo điểm chạm (Promptable Point)
     if x is not None and y is not None:
@@ -135,6 +160,7 @@ class SamBase64Request(BaseModel):
     x: Optional[float] = None
     y: Optional[float] = None
     detections: Optional[list] = None
+    use_cached_if_fresh: bool = False
 
 
 @router.get("/segment/status")
@@ -171,7 +197,14 @@ async def sam_segment_base64(req: SamBase64Request):
         if "," in data:
             data = data.split(",", 1)[1]
         image_bytes = base64.b64decode(data)
-        return await asyncio.to_thread(_segment_sync, image_bytes, req.x, req.y, req.detections)
+        return await asyncio.to_thread(
+            _segment_sync,
+            image_bytes,
+            req.x,
+            req.y,
+            req.detections,
+            req.use_cached_if_fresh,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:

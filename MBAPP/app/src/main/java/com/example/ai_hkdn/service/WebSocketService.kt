@@ -106,22 +106,27 @@ class WebSocketService(
     }
 
     /**
+     * Kiểm tra trước khi giải mã/nén ảnh CameraX để tránh lãng phí CPU điện thoại cho các frame sẽ bị drop.
+     */
+    fun canSendFrame(): Boolean {
+        if (status != ConnectionStatus.CONNECTED) return false
+        if (isWaitingForResponse.get()) {
+            if (System.currentTimeMillis() - lastSendTime > 2000) {
+                isWaitingForResponse.set(false)
+                return true
+            }
+            return false
+        }
+        return true
+    }
+
+    /**
      * Gửi frame ảnh (Base64) lên server:
      * - Trả về `true` nếu frame được gửi đi.
      * - Trả về `false` nếu frame bị bỏ qua (đang đợi phản hồi từ frame trước) -> Giữ FPS mượt, không giật lag.
      */
     fun sendFrame(base64Image: String): Boolean {
-        if (status != ConnectionStatus.CONNECTED) return false
-
-        // Adaptive Backpressure: Nếu frame trước chưa xử lý xong, bỏ qua frame này (drop frame)
-        if (isWaitingForResponse.get()) {
-            // Nếu đã chờ quá 1500ms mà chưa có phản hồi -> Coi như timeout, reset cờ để không bị kẹt vĩnh viễn
-            if (System.currentTimeMillis() - lastSendTime > 1500) {
-                isWaitingForResponse.set(false)
-            } else {
-                return false // Drop frame một cách êm ái
-            }
-        }
+        if (!canSendFrame()) return false
 
         isWaitingForResponse.set(true)
         lastSendTime = System.currentTimeMillis()

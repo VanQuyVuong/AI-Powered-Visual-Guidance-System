@@ -33,6 +33,10 @@ android {
     buildFeatures {
         compose = true
     }
+    androidResources {
+        // Không nén file model ONNX/manifest để nạp trực tiếp ổn định, không tốn RAM giải nén
+        noCompress += listOf("onnx", "json")
+    }
 }
 
 dependencies {
@@ -52,10 +56,13 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
     implementation("androidx.camera:camera-view:$cameraxVersion")
 
-    // OkHttp cho WebSocket truyền frame thời gian thực
+    // ONNX Runtime Android (Hỗ trợ NNAPI FP16 cho NPU Dimensity 7300-Ultra + XNNPACK CPU)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
+
+    // OkHttp cho WebSocket truyền telemetry & stream
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // Gson parse JSON phản hồi từ AI server
+    // Gson parse JSON phản hồi & manifest model
     implementation("com.google.code.gson:gson:2.11.0")
 
     // Material Icons Extended
